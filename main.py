@@ -65,7 +65,11 @@ init_db()
 
 @app.post("/webhook")
 async def receive_message(request: Request):
-    data = await request.json()
+    try:
+        body = await request.body()
+        data = json.loads(body.decode("utf-8", errors="replace"))
+    except Exception:
+        data = {}
     sender = data.get("sender", "不明").strip()
     message = data.get("message", "").strip()
 
