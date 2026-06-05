@@ -1,6 +1,5 @@
 from fastapi import FastAPI, UploadFile, File, Request
 from fastapi.responses import HTMLResponse
-import google.generativeai as genai
 import sqlite3
 import httpx
 import os
@@ -13,9 +12,21 @@ app = FastAPI()
 GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
 NTFY_CHANNEL = os.environ.get("NTFY_CHANNEL", "line-reply-default")
 DB_PATH = "/data/line_assistant.db" if os.path.exists("/data") else "line_assistant.db"
+GEMINI_URL = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
 
-genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel("gemini-1.5-flash")
+
+async def ask_gemini(prompt: str) -> str:
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {"maxOutputTokens": 300}
+    }
+    async with httpx.AsyncClient(timeout=30) as http:
+        res = await http.post(GEMINI_URL, json=payload)
+        data = res.json()
+    try:
+        return data["candidates"][0]["content"]["parts"][0]["text"].strip()
+    except Exception:
+        return "（返信の生成に失敗しました）"
 
 
 def init_db():
@@ -104,8 +115,7 @@ async def receive_message(request: Request):
 
 返信文のみ出力してください。前置き・説明・引用符は不要です。"""
 
-    response = model.generate_content(prompt)
-    reply = response.text.strip()
+    reply = await ask_gemini(prompt)
 
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
@@ -120,7 +130,7 @@ async def receive_message(request: Request):
     base_url = os.environ.get("RENDER_EXTERNAL_URL", "http://localhost:8000")
     encoded_reply = urllib.parse.quote(reply)
 
-    async with httpx.AsyncClient() as http:
+    async with httpx.AsyncClient(timeout=10) as http:
         await http.post(
             f"https://ntfy.sh/{NTFY_CHANNEL}",
             content=reply.encode("utf-8"),
@@ -146,29 +156,26 @@ async def copy_page(text: str = "", id: int = 0):
 <style>
   body{{font-family:sans-serif;padding:20px;background:#f0f0f0;max-width:500px;margin:0 auto}}
   .card{{background:white;border-radius:16px;padding:24px;box-shadow:0 2px 8px rgba(0,0,0,.1);margin-bottom:16px}}
-  .msg{{font-size:20px;line-height:1.6;margin:16px 0;color:#222;word-break:break-all;
-        background:#e8f5e9;border-radius:12px;padding:16px}}
-  button{{width:100%;padding:16px;font-size:18px;border:none;border-radius:12px;
-          background:#06c755;color:white;cursor:pointer;margin:6px 0}}
+  .msg{{font-size:20px;line-height:1.6;margin:16px 0;color:#222;word-break:break-all;background:#e8f5e9;border-radius:12px;padding:16px}}
+  button{{width:100%;padding:16px;font-size:18px;border:none;border-radius:12px;background:#06c755;color:white;cursor:pointer;margin:6px 0}}
   button.gray{{background:#aaa}}
   .done{{color:#06c755;font-weight:bold;display:none;text-align:center;margin-top:8px;font-size:16px}}
-  textarea{{width:100%;box-sizing:border-box;padding:12px;font-size:16px;
-            border:1px solid #ddd;border-radius:8px;margin-top:8px}}
+  textarea{{width:100%;box-sizing:border-box;padding:12px;font-size:16px;border:1px solid #ddd;border-radius:8px;margin-top:8px}}
   hr{{border:none;border-top:1px solid #eee;margin:16px 0}}
   p.hint{{color:#999;font-size:13px;margin:4px 0}}
 </style>
 </head>
 <body>
 <div class="card">
-  <p style="color:#666;margin:0;font-size:14px">返信案（タップしてコピー）</p>
-  <div class="msg" id="msg" onclick="copyText()">{escaped}</div>
+  <p style="color:#666;margin:0;font-size:14px">返信案</p>
+  <div class="msg" id="msg">{escaped}</div>
   <button onclick="copyText()">📋 クリップボードにコピー</button>
-  <p class="done" id="done">✅ コピーしました！LINEに戻って貼り付けて送信してください</p>
+  <p class="done" id="done">✅ コピーしました！LINEに貼り付けて送信してください</p>
   <hr>
   <p class="hint">修正して送った場合は記録できます（次回の返信が改善されます）</p>
   <textarea id="actual" placeholder="実際に送った内容..." rows="3"></textarea>
   <button class="gray" onclick="sendFeedback({id})">📝 修正内容を記録する</button>
-  <p class="done" id="fb-done">✅ 記録しました。次回から活かします！</p>
+  <p class="done" id="fb-done">✅ 記録しました！</p>
 </div>
 <script>
 function copyText(){{
@@ -270,8 +277,7 @@ LINEの返信を考えるときに役立つ情報を3〜5文でまとめてく�
 
 プロフィール文のみ出力してください。"""
 
-        response = model.generate_content(prompt)
-        profile = response.text.strip()
+        profile = await ask_gemini(prompt)
 
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
