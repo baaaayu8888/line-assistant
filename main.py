@@ -139,9 +139,9 @@ async def receive_message(request: Request):
             f"https://ntfy.sh/{NTFY_CHANNEL}",
             content=reply.encode("utf-8"),
             headers={
-                "Title": f"💬 {sender}への返信案",
+                "Title": f"{sender}への返信案".encode("utf-8"),
                 "Tags": "speech_balloon",
-                "Actions": f"view, 📋 コピーして送る, {base_url}/copy?text={encoded_reply}&id={conv_id}"
+                "Actions": f"view, Copy, {base_url}/copy?text={encoded_reply}&id={conv_id}".encode("utf-8")
             }
         )
 
