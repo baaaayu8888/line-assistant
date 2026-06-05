@@ -74,7 +74,7 @@ async def receive_message(request: Request):
     message = data.get("message", "").strip()
 
     if not message:
-        return {"status": "skipped"}
+        message = "（メッセージ内容を取得できませんでした）"
 
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
