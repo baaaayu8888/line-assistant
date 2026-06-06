@@ -289,10 +289,22 @@ async def analyze_history(files: list[UploadFile] = File(...)):
                      re.search(r'LINE_(.+?)のトーク', filename)
         contact_name = name_match.group(1).strip() if name_match else filename.replace(".txt", "").strip()
 
-        prompt = f"""以下はLINEトーク履歴です。この相手との関係性・口調・よく話す話題・絵文字の傾向を分析し、
-LINEの返信を考えるときに役立つ情報を3〜5文でまとめてください。
+        # 全履歴から均等にサンプリング（冒頭・中間・最新）
+        lines = text.splitlines()
+        total = len(lines)
+        if total <= 300:
+            sample = text
+        else:
+            head = "\n".join(lines[:100])
+            mid = "\n".join(lines[total // 2 - 50: total // 2 + 50])
+            tail = "\n".join(lines[-100:])
+            sample = f"{head}\n\n...(中略)...\n\n{mid}\n\n...(中略)...\n\n{tail}"
 
-{text[:5000]}
+        prompt = f"""以下はLINEトーク履歴のサンプルです（冒頭・中間・最新を抜粋）。
+この相手との関係性・口調・よく話す話題・絵文字の傾向・返信するときの注意点を分析し、
+LINEの返信を考えるときに役立つ情報を5〜8文でまとめてください。
+
+{sample[:6000]}
 
 プロフィール文のみ出力してください。"""
 
@@ -303,6 +315,38 @@ LINEの返信を考えるときに役立つ情報を3〜5文でまとめてく�
         results.append({"name": contact_name, "profile": profile})
 
     return {"analyzed": results}
+
+
+@app.post("/set_profile")
+async def set_profile(request: Request):
+    """Claude等が直接プロフィールを書き込む用エンドポイント"""
+    data = await request.json()
+    name = data.get("name", "").strip()
+    profile = data.get("profile", "").strip()
+    if not name or not profile:
+        return {"status": "error", "message": "name と profile は必須"}
+    sb.table("contacts").upsert({"name": name, "profile": profile}).execute()
+    return {"status": "ok", "name": name}
+
+
+@app.get("/contacts", response_class=HTMLResponse)
+async def contacts_page():
+    res = sb.table("contacts").select("name, profile").order("name").execute()
+    rows = res.data if res.data else []
+    cards = ""
+    for row in rows:
+        name = row["name"].replace("<", "&lt;").replace(">", "&gt;")
+        profile = (row["profile"] or "").replace("<", "&lt;").replace(">", "&gt;").replace("\n", "<br>")
+        cards += f'<div class="card"><h3>{name}</h3><p>{profile}</p></div>'
+    if not cards:
+        cards = "<div class='card'><p>まだ登録なし</p></div>"
+    return f"""<!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>連絡先プロフィール</title>
+<style>body{{font-family:sans-serif;padding:16px;background:#f0f0f0;max-width:600px;margin:0 auto}}
+.card{{background:white;border-radius:16px;padding:20px;box-shadow:0 2px 8px rgba(0,0,0,.1);margin-bottom:12px}}
+h3{{margin:0 0 8px;color:#333}}p{{color:#555;font-size:14px;line-height:1.6;margin:0}}</style>
+</head><body><h2>👥 連絡先プロフィール</h2>{cards}</body></html>"""
 
 
 @app.get("/")
