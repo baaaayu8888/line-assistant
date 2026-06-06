@@ -1,7 +1,8 @@
 name: Deploy to Cloud Run
 
 on:
-  workflow_dispatch:  # 手動実行のみ（Renderを使うため自動デプロイ無効）
+  push:
+    branches: [main]
 
 env:
   PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
