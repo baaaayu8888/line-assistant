@@ -10,24 +10,29 @@ from datetime import datetime
 
 app = FastAPI()
 
-GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
+GROQ_API_KEY = os.environ["GROQ_API_KEY"]
 NTFY_CHANNEL = os.environ.get("NTFY_CHANNEL", "line-reply-default")
 DB_PATH = "/data/line_assistant.db" if os.path.exists("/data") else "line_assistant.db"
-GEMINI_URL = f"https://generativelanguage.googleapis.com/v1/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
+GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 
-async def ask_gemini(prompt: str) -> str:
+async def ask_groq(prompt: str) -> str:
     payload = {
-        "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"maxOutputTokens": 300}
+        "model": "llama3-8b-8192",
+        "messages": [{"role": "user", "content": prompt}],
+        "max_tokens": 300
     }
     async with httpx.AsyncClient(timeout=30) as http:
-        res = await http.post(GEMINI_URL, json=payload)
+        res = await http.post(
+            GROQ_URL,
+            json=payload,
+            headers={"Authorization": f"Bearer {GROQ_API_KEY}"}
+        )
         data = res.json()
     try:
-        return data["candidates"][0]["content"]["parts"][0]["text"].strip()
+        return data["choices"][0]["message"]["content"].strip()
     except Exception as e:
-        raise RuntimeError(f"Gemini failed: status={res.status_code} body={json.dumps(data, ensure_ascii=False)[:500]} exc={e}")
+        raise RuntimeError(f"Groq failed: status={res.status_code} body={json.dumps(data, ensure_ascii=False)[:500]} exc={e}")
 
 
 def init_db():
@@ -120,7 +125,7 @@ async def receive_message(request: Request):
 
 返信文のみ出力してください。前置き・説明・引用符は不要です。"""
 
-    reply = await ask_gemini(prompt)
+    reply = await ask_groq(prompt)
 
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
@@ -282,7 +287,7 @@ LINEの返信を考えるときに役立つ情報を3〜5文でまとめてく�
 
 プロフィール文のみ出力してください。"""
 
-        profile = await ask_gemini(prompt)
+        profile = await ask_groq(prompt)
 
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
