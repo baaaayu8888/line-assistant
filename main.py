@@ -29,11 +29,16 @@ GOOGLE_REFRESH_TOKEN = os.environ.get("GOOGLE_REFRESH_TOKEN", "")
 CALENDAR_ID = os.environ.get("CALENDAR_ID", "nakashibakogyo@gmail.com")
 
 
-async def ask_groq(prompt: str, max_tokens: int = 300) -> str:
+async def ask_groq(prompt: str, max_tokens: int = 300, system: str = None) -> str:
+    messages = []
+    if system:
+        messages.append({"role": "system", "content": system})
+    messages.append({"role": "user", "content": prompt})
     payload = {
-        "model": "llama-3.1-8b-instant",
-        "messages": [{"role": "user", "content": prompt}],
-        "max_tokens": max_tokens
+        "model": "llama-3.3-70b-versatile",
+        "messages": messages,
+        "max_tokens": max_tokens,
+        "temperature": 0.7
     }
     async with httpx.AsyncClient(timeout=30) as http:
         res = await http.post(
@@ -229,7 +234,7 @@ async def receive_message(request: Request):
 
     # プロフィール取得
     res = sb.table("contacts").select("profile").eq("name", sender).execute()
-    profile = res.data[0]["profile"] if res.data else "（履歴なし）"
+    profile = res.data[0]["profile"] if res.data else None
 
     # 直近の会話取得
     res = sb.table("conversations").select("their_message, actual_reply") \
@@ -242,29 +247,41 @@ async def receive_message(request: Request):
         .eq("contact", sender).order("timestamp", desc=True).limit(3).execute()
     corrections = res.data if res.data else []
 
-    recent_text = ""
-    if recent:
-        recent_text = "\n\n【直近の会話】\n"
-        for row in recent:
-            recent_text += f"相手: {row['their_message']}\n自分: {row['actual_reply']}\n"
-
-    correction_text = ""
+    # システムプロンプト構築
+    system_parts = [
+        "あなたは中芝悠太（ゆうだい）のLINE返信アシスタントです。",
+        "悠太になりきって、自然でカジュアルな返信文を1つだけ生成してください。",
+        "",
+        "【返信ルール】",
+        "- 返信文のみ出力。前置き・説明・「返信:」などの見出し・引用符は一切不要",
+        "- タメ口・短文・テンポよく（1〜3文が理想）",
+        "- 感情への共感を先に出し、解決策は後",
+        "- 絵文字は相手のトーンに合わせて適度に使う",
+        "- 長々と説明しない。LINEらしく簡潔に",
+    ]
+    if profile:
+        system_parts += ["", f"【{sender}のプロフィール】", profile]
+    else:
+        system_parts += ["", f"【{sender}】との関係: 詳細不明。無難にタメ口で返す"]
     if corrections:
-        correction_text = "\n\n【過去の修正から学んだこと】\n"
+        system_parts.append("\n【過去の修正（この反省を活かす）】")
         for row in corrections:
-            correction_text += f"・「{row['suggested']}」→「{row['corrected']}」に直された\n"
+            system_parts.append(f"- NG:「{row['suggested']}」→ OK:「{row['corrected']}」")
+    system_prompt = "\n".join(system_parts)
 
-    prompt = f"""あなたはLINEの返信アシスタントです。
-以下の情報をもとに、自然なLINE返信文を1つだけ生成してください。
+    # ユーザープロンプト構築
+    user_parts = []
+    if recent:
+        user_parts.append("【直近の会話の流れ】")
+        for row in recent:
+            user_parts.append(f"相手: {row['their_message']}")
+            user_parts.append(f"自分: {row['actual_reply']}")
+        user_parts.append("")
+    user_parts.append(f"【{sender}からの今のメッセージ】")
+    user_parts.append(message)
+    user_prompt = "\n".join(user_parts)
 
-【送信者】{sender}
-【関係性・口調の特徴】{profile}
-{correction_text}{recent_text}
-【届いたメッセージ】{message}
-
-返信文のみ出力してください。前置き・説明・引用符は不要です。"""
-
-    reply = await ask_groq(prompt)
+    reply = await ask_groq(user_prompt, system=system_prompt)
 
     # 会話を保存
     res = sb.table("conversations").insert({
