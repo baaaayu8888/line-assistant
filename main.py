@@ -1,10 +1,13 @@
-from fastapi import FastAPI, UploadFile, File, Request
+from fastapi import FastAPI, UploadFile, File, Request, HTTPException
 from fastapi.responses import HTMLResponse
 import httpx
 import json
 import os
 import re
 import urllib.parse
+import hmac
+import hashlib
+import base64
 from datetime import datetime
 from supabase import create_client, Client
 
@@ -18,12 +21,19 @@ SUPABASE_URL = os.environ["SUPABASE_URL"]
 SUPABASE_KEY = os.environ["SUPABASE_KEY"]
 sb: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
+LINE_CHANNEL_SECRET = os.environ.get("LINE_CHANNEL_SECRET", "")
+LINE_CHANNEL_ACCESS_TOKEN = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN", "")
+GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
+GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "")
+GOOGLE_REFRESH_TOKEN = os.environ.get("GOOGLE_REFRESH_TOKEN", "")
+CALENDAR_ID = os.environ.get("CALENDAR_ID", "nakashibakogyo@gmail.com")
 
-async def ask_groq(prompt: str) -> str:
+
+async def ask_groq(prompt: str, max_tokens: int = 300) -> str:
     payload = {
         "model": "llama-3.1-8b-instant",
         "messages": [{"role": "user", "content": prompt}],
-        "max_tokens": 300
+        "max_tokens": max_tokens
     }
     async with httpx.AsyncClient(timeout=30) as http:
         res = await http.post(
@@ -36,6 +46,172 @@ async def ask_groq(prompt: str) -> str:
         return data["choices"][0]["message"]["content"].strip()
     except Exception as e:
         raise RuntimeError(f"Groq failed: status={res.status_code} body={json.dumps(data, ensure_ascii=False)[:500]} exc={e}")
+
+
+async def get_google_access_token() -> str:
+    async with httpx.AsyncClient(timeout=10) as client:
+        res = await client.post(
+            "https://oauth2.googleapis.com/token",
+            data={
+                "client_id": GOOGLE_CLIENT_ID,
+                "client_secret": GOOGLE_CLIENT_SECRET,
+                "refresh_token": GOOGLE_REFRESH_TOKEN,
+                "grant_type": "refresh_token",
+            }
+        )
+        return res.json()["access_token"]
+
+
+def calc_end_time(start_time: str) -> str:
+    h, m = map(int, start_time.split(":"))
+    if h < 12:
+        return "12:00"
+    elif h < 15:
+        return "15:00"
+    elif h < 17:
+        return "17:00"
+    else:
+        return f"{(h + 2) % 24:02d}:{m:02d}"
+
+
+async def detect_intent(message: str) -> str:
+    prompt = f"""以下のLINEメッセージは「スケジュール登録依頼」か「通常の会話返信」のどちらですか？
+
+スケジュール登録依頼の特徴：日付・時間・会社名・作業内容が含まれる施工依頼
+
+メッセージ：{message}
+
+「schedule」または「reply」の1単語のみで答えてください。"""
+    result = await ask_groq(prompt, max_tokens=10)
+    return "schedule" if "schedule" in result.lower() else "reply"
+
+
+async def extract_schedule(message: str) -> dict:
+    today = datetime.now().strftime("%Y年%m月%d日")
+    prompt = f"""今日は{today}です。以下のメッセージから施工スケジュール情報を抽出してください。
+
+メッセージ：{message}
+
+以下のJSON形式のみで返してください（不明な項目はnull）：
+{{
+  "date": "YYYY-MM-DD",
+  "start_time": "HH:MM",
+  "company": "会社名（株式会社等の法人格表記なし）",
+  "person": "担当者名（なければnull）",
+  "work": "作業内容",
+  "location": "場所（市区町村レベル）",
+  "map_url": "GoogleマップURL（あれば）",
+  "notes": "注意事項（あれば）"
+}}"""
+    result = await ask_groq(prompt, max_tokens=400)
+    try:
+        match = re.search(r'\{.*\}', result, re.DOTALL)
+        if match:
+            return json.loads(match.group())
+    except Exception:
+        pass
+    return {}
+
+
+async def register_calendar_event(schedule: dict) -> str:
+    access_token = await get_google_access_token()
+
+    date = schedule["date"]
+    start_time = schedule["start_time"]
+    end_time = calc_end_time(start_time)
+
+    title = schedule.get("company", "不明")
+    if schedule.get("person"):
+        title += schedule["person"]
+
+    desc_parts = [p for p in [
+        schedule.get("work"),
+        schedule.get("notes"),
+        schedule.get("map_url"),
+    ] if p]
+
+    event_body = {
+        "summary": title,
+        "location": schedule.get("location", ""),
+        "description": "\n".join(desc_parts),
+        "start": {"dateTime": f"{date}T{start_time}:00+09:00", "timeZone": "Asia/Tokyo"},
+        "end": {"dateTime": f"{date}T{end_time}:00+09:00", "timeZone": "Asia/Tokyo"},
+        "colorId": "5",
+    }
+
+    async with httpx.AsyncClient(timeout=15) as client:
+        await client.post(
+            f"https://www.googleapis.com/calendar/v3/calendars/{urllib.parse.quote(CALENDAR_ID)}/events",
+            json=event_body,
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+    return end_time
+
+
+async def send_line_reply(reply_token: str, text: str):
+    if not LINE_CHANNEL_ACCESS_TOKEN or not reply_token:
+        return
+    async with httpx.AsyncClient(timeout=10) as client:
+        await client.post(
+            "https://api.line.me/v2/bot/message/reply",
+            json={"replyToken": reply_token, "messages": [{"type": "text", "text": text}]},
+            headers={"Authorization": f"Bearer {LINE_CHANNEL_ACCESS_TOKEN}"},
+        )
+
+
+@app.post("/line-webhook")
+async def line_webhook(request: Request):
+    body = await request.body()
+
+    if LINE_CHANNEL_SECRET:
+        signature = request.headers.get("X-Line-Signature", "")
+        mac = hmac.new(LINE_CHANNEL_SECRET.encode("utf-8"), body, hashlib.sha256)
+        expected = base64.b64encode(mac.digest()).decode("utf-8")
+        if not hmac.compare_digest(signature, expected):
+            raise HTTPException(status_code=400, detail="Invalid signature")
+
+    data = json.loads(body)
+
+    for event in data.get("events", []):
+        if event.get("type") != "message":
+            continue
+        if event.get("message", {}).get("type") != "text":
+            continue
+
+        message = event["message"]["text"].strip()
+        reply_token = event.get("replyToken", "")
+
+        intent = await detect_intent(message)
+
+        if intent == "schedule":
+            schedule = await extract_schedule(message)
+            missing = [label for label, val in [
+                ("日付", schedule.get("date")),
+                ("時間", schedule.get("start_time")),
+                ("会社名または作業内容", schedule.get("company") or schedule.get("work")),
+            ] if not val]
+
+            if missing:
+                reply = f"以下の情報が不足しています：{' / '.join(missing)}\nもう一度送ってください。"
+            else:
+                end_time = await register_calendar_event(schedule)
+                title = schedule.get("company", "")
+                if schedule.get("person"):
+                    title += schedule["person"]
+                reply = "\n".join(filter(None, [
+                    f"✅ 登録しました！",
+                    f"{schedule['date']}  {schedule['start_time']}〜{end_time}",
+                    title,
+                    schedule.get("location", ""),
+                ]))
+        else:
+            reply = await ask_groq(
+                f"以下のLINEメッセージに自然な短い返信を1文で:\n{message}"
+            )
+
+        await send_line_reply(reply_token, reply)
+
+    return {"status": "ok"}
 
 
 @app.post("/webhook")
