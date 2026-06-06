@@ -26,7 +26,8 @@ async def ask_gemini(prompt: str) -> str:
         data = res.json()
     try:
         return data["candidates"][0]["content"]["parts"][0]["text"].strip()
-    except Exception:
+    except Exception as e:
+        print(f"[Gemini ERROR] status={res.status_code} body={json.dumps(data, ensure_ascii=False)[:500]} exc={e}")
         return "（返信の生成に失敗しました）"
 
 
