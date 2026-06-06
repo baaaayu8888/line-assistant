@@ -1,19 +1,22 @@
 from fastapi import FastAPI, UploadFile, File, Request
 from fastapi.responses import HTMLResponse
-import sqlite3
 import httpx
 import json
 import os
 import re
 import urllib.parse
 from datetime import datetime
+from supabase import create_client, Client
 
 app = FastAPI()
 
 GROQ_API_KEY = os.environ["GROQ_API_KEY"]
 NTFY_CHANNEL = os.environ.get("NTFY_CHANNEL", "line-reply-default")
-DB_PATH = "/data/line_assistant.db" if os.path.exists("/data") else "line_assistant.db"
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
+
+SUPABASE_URL = os.environ["SUPABASE_URL"]
+SUPABASE_KEY = os.environ["SUPABASE_KEY"]
+sb: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 
 async def ask_groq(prompt: str) -> str:
@@ -35,40 +38,6 @@ async def ask_groq(prompt: str) -> str:
         raise RuntimeError(f"Groq failed: status={res.status_code} body={json.dumps(data, ensure_ascii=False)[:500]} exc={e}")
 
 
-def init_db():
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS contacts (
-            name TEXT PRIMARY KEY,
-            profile TEXT
-        )
-    """)
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS conversations (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            contact TEXT,
-            their_message TEXT,
-            suggested_reply TEXT,
-            actual_reply TEXT,
-            timestamp TEXT
-        )
-    """)
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS corrections (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            contact TEXT,
-            suggested TEXT,
-            corrected TEXT,
-            timestamp TEXT
-        )
-    """)
-    conn.commit()
-    conn.close()
-
-init_db()
-
-
 @app.post("/webhook")
 async def receive_message(request: Request):
     try:
@@ -82,38 +51,32 @@ async def receive_message(request: Request):
     if not message:
         message = "（メッセージ内容を取得できませんでした）"
 
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
+    # プロフィール取得
+    res = sb.table("contacts").select("profile").eq("name", sender).execute()
+    profile = res.data[0]["profile"] if res.data else "（履歴なし）"
 
-    c.execute("SELECT profile FROM contacts WHERE name = ?", (sender,))
-    row = c.fetchone()
-    profile = row[0] if row else "（履歴なし）"
+    # 直近の会話取得
+    res = sb.table("conversations").select("their_message, actual_reply") \
+        .eq("contact", sender).not_.is_("actual_reply", "null") \
+        .order("timestamp", desc=True).limit(5).execute()
+    recent = list(reversed(res.data)) if res.data else []
 
-    c.execute("""
-        SELECT their_message, actual_reply FROM conversations
-        WHERE contact = ? AND actual_reply IS NOT NULL
-        ORDER BY timestamp DESC LIMIT 5
-    """, (sender,))
-    recent = list(reversed(c.fetchall()))
-
-    c.execute("""
-        SELECT suggested, corrected FROM corrections
-        WHERE contact = ? ORDER BY timestamp DESC LIMIT 3
-    """, (sender,))
-    corrections = c.fetchall()
-    conn.close()
+    # 修正履歴取得
+    res = sb.table("corrections").select("suggested, corrected") \
+        .eq("contact", sender).order("timestamp", desc=True).limit(3).execute()
+    corrections = res.data if res.data else []
 
     recent_text = ""
     if recent:
         recent_text = "\n\n【直近の会話】\n"
-        for their_msg, my_reply in recent:
-            recent_text += f"相手: {their_msg}\n自分: {my_reply}\n"
+        for row in recent:
+            recent_text += f"相手: {row['their_message']}\n自分: {row['actual_reply']}\n"
 
     correction_text = ""
     if corrections:
         correction_text = "\n\n【過去の修正から学んだこと】\n"
-        for sugg, corr in corrections:
-            correction_text += f"・「{sugg}」→「{corr}」に直された\n"
+        for row in corrections:
+            correction_text += f"・「{row['suggested']}」→「{row['corrected']}」に直された\n"
 
     prompt = f"""あなたはLINEの返信アシスタントです。
 以下の情報をもとに、自然なLINE返信文を1つだけ生成してください。
@@ -127,15 +90,14 @@ async def receive_message(request: Request):
 
     reply = await ask_groq(prompt)
 
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("""
-        INSERT INTO conversations (contact, their_message, suggested_reply, timestamp)
-        VALUES (?, ?, ?, ?)
-    """, (sender, message, reply, datetime.now().isoformat()))
-    conv_id = c.lastrowid
-    conn.commit()
-    conn.close()
+    # 会話を保存
+    res = sb.table("conversations").insert({
+        "contact": sender,
+        "their_message": message,
+        "suggested_reply": reply,
+        "timestamp": datetime.now().isoformat()
+    }).execute()
+    conv_id = res.data[0]["id"] if res.data else 0
 
     base_url = os.environ.get("RENDER_EXTERNAL_URL", "http://localhost:8000")
     encoded_reply = urllib.parse.quote(reply)
@@ -156,17 +118,17 @@ async def receive_message(request: Request):
 
 @app.get("/latest", response_class=HTMLResponse)
 async def latest_page():
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("""
-        SELECT contact, their_message, suggested_reply, timestamp, id
-        FROM conversations ORDER BY timestamp DESC LIMIT 10
-    """)
-    rows = c.fetchall()
-    conn.close()
+    res = sb.table("conversations").select("contact, their_message, suggested_reply, timestamp, id") \
+        .order("timestamp", desc=True).limit(10).execute()
+    rows = res.data if res.data else []
 
     cards = ""
-    for contact, their_msg, reply, ts, conv_id in rows:
+    for row in rows:
+        contact = row["contact"]
+        their_msg = row["their_message"]
+        reply = row["suggested_reply"]
+        ts = row["timestamp"]
+        conv_id = row["id"]
         escaped_reply = reply.replace('"', '&quot;').replace('<', '&lt;').replace('>', '&gt;')
         encoded = urllib.parse.quote(reply)
         cards += f"""
@@ -258,20 +220,18 @@ async def save_feedback(request: Request):
     conv_id = data.get("conv_id")
     actual_reply = data.get("actual_reply", "").strip()
 
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("SELECT contact, suggested_reply FROM conversations WHERE id = ?", (conv_id,))
-    row = c.fetchone()
-    if row:
-        contact, suggested = row
-        c.execute("UPDATE conversations SET actual_reply = ? WHERE id = ?", (actual_reply, conv_id))
+    res = sb.table("conversations").select("contact, suggested_reply").eq("id", conv_id).execute()
+    if res.data:
+        contact = res.data[0]["contact"]
+        suggested = res.data[0]["suggested_reply"]
+        sb.table("conversations").update({"actual_reply": actual_reply}).eq("id", conv_id).execute()
         if actual_reply and actual_reply != suggested:
-            c.execute("""
-                INSERT INTO corrections (contact, suggested, corrected, timestamp)
-                VALUES (?, ?, ?, ?)
-            """, (contact, suggested, actual_reply, datetime.now().isoformat()))
-    conn.commit()
-    conn.close()
+            sb.table("corrections").insert({
+                "contact": contact,
+                "suggested": suggested,
+                "corrected": actual_reply,
+                "timestamp": datetime.now().isoformat()
+            }).execute()
     return {"status": "ok"}
 
 
@@ -338,11 +298,7 @@ LINEの返信を考えるときに役立つ情報を3〜5文でまとめてく�
 
         profile = await ask_groq(prompt)
 
-        conn = sqlite3.connect(DB_PATH)
-        c = conn.cursor()
-        c.execute("INSERT OR REPLACE INTO contacts (name, profile) VALUES (?, ?)", (contact_name, profile))
-        conn.commit()
-        conn.close()
+        sb.table("contacts").upsert({"name": contact_name, "profile": profile}).execute()
 
         results.append({"name": contact_name, "profile": profile})
 
