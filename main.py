@@ -13,7 +13,7 @@ app = FastAPI()
 GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
 NTFY_CHANNEL = os.environ.get("NTFY_CHANNEL", "line-reply-default")
 DB_PATH = "/data/line_assistant.db" if os.path.exists("/data") else "line_assistant.db"
-GEMINI_URL = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
+GEMINI_URL = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
 
 
 async def ask_gemini(prompt: str) -> str:
