@@ -154,6 +154,55 @@ async def receive_message(request: Request):
     return {"status": "ok", "reply": reply, "conv_id": conv_id}
 
 
+@app.get("/latest", response_class=HTMLResponse)
+async def latest_page():
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("""
+        SELECT contact, their_message, suggested_reply, timestamp, id
+        FROM conversations ORDER BY timestamp DESC LIMIT 10
+    """)
+    rows = c.fetchall()
+    conn.close()
+
+    cards = ""
+    for contact, their_msg, reply, ts, conv_id in rows:
+        escaped_reply = reply.replace('"', '&quot;').replace('<', '&lt;').replace('>', '&gt;')
+        encoded = urllib.parse.quote(reply)
+        cards += f"""
+<div class="card">
+  <p class="meta">{ts[:16]} ／ <strong>{contact}</strong>「{their_msg[:30]}」</p>
+  <div class="msg">{escaped_reply}</div>
+  <a href="/copy?text={encoded}&id={conv_id}"><button>📋 コピーページへ</button></a>
+</div>"""
+
+    if not cards:
+        cards = "<div class='card'><p>まだ返信案がありません</p></div>"
+
+    return f"""<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="refresh" content="30">
+<title>最新の返信案</title>
+<style>
+  body{{font-family:sans-serif;padding:16px;background:#f0f0f0;max-width:500px;margin:0 auto}}
+  .card{{background:white;border-radius:16px;padding:20px;box-shadow:0 2px 8px rgba(0,0,0,.1);margin-bottom:12px}}
+  .meta{{color:#999;font-size:12px;margin:0 0 8px}}
+  .msg{{font-size:18px;line-height:1.6;color:#222;background:#e8f5e9;border-radius:12px;padding:12px;word-break:break-all}}
+  button{{width:100%;padding:14px;font-size:16px;border:none;border-radius:12px;background:#06c755;color:white;cursor:pointer;margin-top:10px}}
+  a{{text-decoration:none}}
+  h2{{color:#333;margin:0 0 16px}}
+</style>
+</head>
+<body>
+<h2>💬 最新の返信案</h2>
+<p style="color:#999;font-size:12px;margin:-8px 0 16px">30秒ごとに自動更新</p>
+{cards}
+</body></html>"""
+
+
 @app.get("/copy", response_class=HTMLResponse)
 async def copy_page(text: str = "", id: int = 0):
     escaped = text.replace('"', '&quot;').replace('<', '&lt;').replace('>', '&gt;')
