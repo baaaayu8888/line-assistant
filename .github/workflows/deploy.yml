@@ -1,0 +1,52 @@
+name: Deploy to Cloud Run
+
+on:
+  push:
+    branches: [main]
+
+env:
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  SERVICE: line-assistant
+  REGION: asia-northeast1
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Deploy to Cloud Run
+        run: |
+          gcloud run deploy $SERVICE \
+            --source . \
+            --region $REGION \
+            --allow-unauthenticated \
+            --project $PROJECT_ID \
+            --set-env-vars "\
+          GROQ_API_KEY=${{ secrets.GROQ_API_KEY }},\
+          NTFY_CHANNEL=${{ secrets.NTFY_CHANNEL }},\
+          SUPABASE_URL=${{ secrets.SUPABASE_URL }},\
+          SUPABASE_KEY=${{ secrets.SUPABASE_KEY }},\
+          LINE_CHANNEL_SECRET=${{ secrets.LINE_CHANNEL_SECRET }},\
+          LINE_CHANNEL_ACCESS_TOKEN=${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }},\
+          GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }},\
+          GOOGLE_CLIENT_SECRET=${{ secrets.GOOGLE_CLIENT_SECRET }},\
+          GOOGLE_REFRESH_TOKEN=${{ secrets.GOOGLE_REFRESH_TOKEN }},\
+          CALENDAR_ID=${{ secrets.CALENDAR_ID }}"
+
+      - name: Show URL
+        run: |
+          URL=$(gcloud run services describe $SERVICE \
+            --region $REGION \
+            --project $PROJECT_ID \
+            --format="value(status.url)")
+          echo "✅ デプロイ完了: $URL"
+          echo "LINE Webhook URL: $URL/line-webhook"
