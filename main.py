@@ -64,7 +64,10 @@ async def get_google_access_token() -> str:
                 "grant_type": "refresh_token",
             }
         )
-        return res.json()["access_token"]
+        data = res.json()
+        if "access_token" not in data:
+            raise RuntimeError(f"Google token error: {data.get('error')}: {data.get('error_description')} (status={res.status_code})")
+        return data["access_token"]
 
 
 def calc_end_time(start_time: str) -> str:
@@ -145,11 +148,13 @@ async def register_calendar_event(schedule: dict) -> str:
     }
 
     async with httpx.AsyncClient(timeout=15) as client:
-        await client.post(
+        res = await client.post(
             f"https://www.googleapis.com/calendar/v3/calendars/{urllib.parse.quote(CALENDAR_ID)}/events",
             json=event_body,
             headers={"Authorization": f"Bearer {access_token}"},
         )
+        if res.status_code not in (200, 201):
+            raise RuntimeError(f"Calendar API error: status={res.status_code} body={res.text[:300]}")
     return end_time
 
 
@@ -186,33 +191,38 @@ async def line_webhook(request: Request):
         message = event["message"]["text"].strip()
         reply_token = event.get("replyToken", "")
 
-        intent = await detect_intent(message)
+        try:
+            intent = await detect_intent(message)
 
-        if intent == "schedule":
-            schedule = await extract_schedule(message)
-            missing = [label for label, val in [
-                ("日付", schedule.get("date")),
-                ("時間", schedule.get("start_time")),
-                ("会社名または作業内容", schedule.get("company") or schedule.get("work")),
-            ] if not val]
+            if intent == "schedule":
+                schedule = await extract_schedule(message)
+                missing = [label for label, val in [
+                    ("日付", schedule.get("date")),
+                    ("時間", schedule.get("start_time")),
+                    ("会社名または作業内容", schedule.get("company") or schedule.get("work")),
+                ] if not val]
 
-            if missing:
-                reply = f"以下の情報が不足しています：{' / '.join(missing)}\nもう一度送ってください。"
+                if missing:
+                    reply = f"以下の情報が不足しています：{' / '.join(missing)}\nもう一度送ってください。"
+                else:
+                    end_time = await register_calendar_event(schedule)
+                    title = schedule.get("company", "")
+                    if schedule.get("person"):
+                        title += schedule["person"]
+                    reply = "\n".join(filter(None, [
+                        "✅ 登録しました！",
+                        f"{schedule['date']}  {schedule['start_time']}〜{end_time}",
+                        title,
+                        schedule.get("location", ""),
+                    ]))
             else:
-                end_time = await register_calendar_event(schedule)
-                title = schedule.get("company", "")
-                if schedule.get("person"):
-                    title += schedule["person"]
-                reply = "\n".join(filter(None, [
-                    f"✅ 登録しました！",
-                    f"{schedule['date']}  {schedule['start_time']}〜{end_time}",
-                    title,
-                    schedule.get("location", ""),
-                ]))
-        else:
-            reply = await ask_groq(
-                f"以下のLINEメッセージに自然な短い返信を1文で:\n{message}"
-            )
+                reply = await ask_groq(
+                    f"以下のLINEメッセージに自然な短い返信を1文で:\n{message}"
+                )
+        except Exception as e:
+            import traceback
+            print(f"ERROR processing LINE message: {traceback.format_exc()}")
+            reply = f"エラーが発生しました：{type(e).__name__}: {str(e)[:150]}"
 
         await send_line_reply(reply_token, reply)
 
