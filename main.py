@@ -14,7 +14,7 @@ from supabase import create_client, Client
 app = FastAPI()
 
 GROQ_API_KEY = os.environ["GROQ_API_KEY"]
-NTFY_CHANNEL = os.environ.get("NTFY_CHANNEL") or "baaaayu-line-2024"
+NTFY_CHANNEL = "baaaayu-line-2024"
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 SUPABASE_URL = os.environ["SUPABASE_URL"]
