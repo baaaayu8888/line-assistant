@@ -347,7 +347,7 @@ async def receive_message(request: Request):
     }).execute()
     conv_id = res.data[0]["id"] if res.data else 0
 
-    base_url = os.environ.get("RENDER_EXTERNAL_URL", "http://localhost:8000")
+    base_url = os.environ.get("BASE_URL", "https://line-assistant-ncpnpxg3hq-an.a.run.app")
     encoded_reply = urllib.parse.quote(reply)
 
     async with httpx.AsyncClient(timeout=10) as http:
@@ -355,9 +355,9 @@ async def receive_message(request: Request):
             f"https://ntfy.sh/{NTFY_CHANNEL}",
             content=reply.encode("utf-8"),
             headers={
-                "Title": f"{sender}への返信案".encode("utf-8"),
+                "Title": f"{sender}への返信案",
                 "Tags": "speech_balloon",
-                "Actions": f"view, Copy, {base_url}/copy?text={encoded_reply}&id={conv_id}".encode("utf-8")
+                "Actions": f"view, Copy, {base_url}/copy?text={encoded_reply}&id={conv_id}"
             }
         )
 
