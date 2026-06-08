@@ -259,20 +259,21 @@ async def receive_message(request: Request):
 
     # システムプロンプト構築
     system_parts = [
-        "あなたは中芝悠太（ゆうだい）のLINE返信アシスタントです。",
-        "悠太になりきって、自然でカジュアルな返信文を1つだけ生成してください。",
+        "あなたはLINE返信の文案を考えるアシスタントです。",
+        f"ユーザー（中芝悠太）が{sender}に送る返信文を1つ提案してください。",
         "",
         "【返信ルール】",
         "- 返信文のみ出力。前置き・説明・「返信:」などの見出し・引用符は一切不要",
-        "- タメ口・短文・テンポよく（1〜3文が理想）",
-        "- 感情への共感を先に出し、解決策は後",
-        "- 絵文字は相手のトーンに合わせて適度に使う",
-        "- 長々と説明しない。LINEらしく簡潔に",
+        "- タメ口・短文・テンポよく（1〜2文が理想）",
+        "- メッセージの内容に正面から答える（質問には答え、報告には共感する）",
+        "- 相手のトーンに合わせた口調・絵文字を使う",
+        "- 具体的な情報（帰宅時間・場所など）がわからない場合は、曖昧でもいいので自然に返す",
+        "- 日本語のみで出力する",
     ]
     if profile:
-        system_parts += ["", f"【{sender}のプロフィール】", profile]
+        system_parts += ["", f"【{sender}について】", profile]
     else:
-        system_parts += ["", f"【{sender}】との関係: 詳細不明。無難にタメ口で返す"]
+        system_parts += ["", f"【{sender}】: 詳細不明。タメ口・短文で返す"]
     if corrections:
         system_parts.append("\n【過去の修正（この反省を活かす）】")
         for row in corrections:
@@ -282,13 +283,14 @@ async def receive_message(request: Request):
     # ユーザープロンプト構築
     user_parts = []
     if recent:
-        user_parts.append("【直近の会話の流れ】")
+        user_parts.append("【直近の会話の流れ（参考）】")
         for row in recent:
-            user_parts.append(f"相手: {row['their_message']}")
-            user_parts.append(f"自分: {row['actual_reply']}")
+            user_parts.append(f"{sender}: {row['their_message']}")
+            user_parts.append(f"悠太: {row['actual_reply']}")
         user_parts.append("")
-    user_parts.append(f"【{sender}からの今のメッセージ】")
-    user_parts.append(message)
+    user_parts.append(f"{sender}からのメッセージ：{message}")
+    user_parts.append("")
+    user_parts.append("悠太の返信文：")
     user_prompt = "\n".join(user_parts)
 
     reply = await ask_groq(user_prompt, system=system_prompt)
