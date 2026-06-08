@@ -748,6 +748,12 @@ async def debug_auth():
     }
 
 
+@app.get("/test-groq")
+async def test_groq():
+    result = await ask_groq("「おけ！また後でね」とだけ返してください")
+    return {"result": result, "repr": repr(result)}
+
+
 @app.get("/")
 async def root():
     return {"status": "✅ LINE返信アシスタント 稼働中", "ntfy_channel": NTFY_CHANNEL}
