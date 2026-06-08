@@ -618,6 +618,28 @@ async def save_token_api(request: Request):
         return {"status": "error", "message": str(e)}
 
 
+@app.get("/debug-auth")
+async def debug_auth():
+    supabase_token = "NOT FOUND"
+    try:
+        res = sb.table("contacts").select("profile").eq("name", "__google_refresh_token__").execute()
+        if res.data and res.data[0]["profile"]:
+            t = res.data[0]["profile"]
+            supabase_token = t[:15] + "..." + t[-4:]
+    except Exception as e:
+        supabase_token = f"error: {e}"
+
+    cid = GOOGLE_CLIENT_ID or "NOT SET"
+    cs = GOOGLE_CLIENT_SECRET or "NOT SET"
+    rt = GOOGLE_REFRESH_TOKEN or "NOT SET"
+    return {
+        "client_id": cid[:40] + "..." if len(cid) > 40 else cid,
+        "client_secret_prefix": cs[:12] if cs != "NOT SET" else cs,
+        "refresh_token_env": (rt[:15] + "..." + rt[-4:]) if len(rt) > 19 else rt,
+        "refresh_token_supabase": supabase_token,
+    }
+
+
 @app.get("/")
 async def root():
     return {"status": "✅ LINE返信アシスタント 稼働中", "ntfy_channel": NTFY_CHANNEL}
