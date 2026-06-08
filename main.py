@@ -363,7 +363,7 @@ async def _receive_message_inner(data: dict):
             f"https://ntfy.sh/{NTFY_CHANNEL}",
             content=reply.encode("utf-8"),
             headers={
-                "Title": f"{sender}への返信案",
+                "Title": urllib.parse.quote(f"{sender}への返信案"),
                 "Tags": "speech_balloon",
                 "Actions": f"view, Copy, {base_url}/copy?text={encoded_reply}&id={conv_id}"
             }
