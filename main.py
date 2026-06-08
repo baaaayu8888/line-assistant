@@ -1,5 +1,5 @@
 from fastapi import FastAPI, UploadFile, File, Request, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 import httpx
 import json
 import os
@@ -54,13 +54,22 @@ async def ask_groq(prompt: str, max_tokens: int = 300, system: str = None) -> st
 
 
 async def get_google_access_token() -> str:
+    # Supabaseに保存されたトークンを優先（/save-token で更新可能）
+    refresh_token = GOOGLE_REFRESH_TOKEN
+    try:
+        res = sb.table("contacts").select("profile").eq("name", "__google_refresh_token__").execute()
+        if res.data and res.data[0]["profile"]:
+            refresh_token = res.data[0]["profile"]
+    except Exception:
+        pass
+
     async with httpx.AsyncClient(timeout=10) as client:
         res = await client.post(
             "https://oauth2.googleapis.com/token",
             data={
                 "client_id": GOOGLE_CLIENT_ID,
                 "client_secret": GOOGLE_CLIENT_SECRET,
-                "refresh_token": GOOGLE_REFRESH_TOKEN,
+                "refresh_token": refresh_token,
                 "grant_type": "refresh_token",
             }
         )
@@ -552,6 +561,61 @@ async def contacts_page():
 .card{{background:white;border-radius:16px;padding:20px;box-shadow:0 2px 8px rgba(0,0,0,.1);margin-bottom:12px}}
 h3{{margin:0 0 8px;color:#333}}p{{color:#555;font-size:14px;line-height:1.6;margin:0}}</style>
 </head><body><h2>👥 連絡先プロフィール</h2>{cards}</body></html>"""
+
+
+@app.get("/save-token", response_class=HTMLResponse)
+async def save_token_page():
+    return """<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Googleトークン更新</title>
+<style>
+  body{font-family:sans-serif;padding:20px;background:#f0f0f0;max-width:500px;margin:0 auto}
+  .card{background:white;border-radius:16px;padding:24px;box-shadow:0 2px 8px rgba(0,0,0,.1)}
+  textarea{width:100%;box-sizing:border-box;padding:12px;font-size:14px;border:1px solid #ddd;border-radius:8px;margin:12px 0;height:100px;font-family:monospace}
+  button{width:100%;padding:16px;font-size:18px;border:none;border-radius:12px;background:#4285f4;color:white;cursor:pointer;margin-top:4px}
+  .done{color:#06c755;font-weight:bold;display:none;text-align:center;margin-top:12px;font-size:16px}
+  p{color:#555;font-size:14px;line-height:1.6}
+</style>
+</head>
+<body>
+<div class="card">
+  <h2>🔑 Googleカレンダー トークン更新</h2>
+  <p>① <a href="https://developers.google.com/oauthplayground" target="_blank">OAuth2 Playground</a> を開く<br>
+  ② 歯車アイコン → 「Use your own OAuth credentials」にチェック → Client ID・Secret入力<br>
+  ③ スコープ: <code>https://www.googleapis.com/auth/calendar</code> を選択 → Authorize APIs<br>
+  ④ Step 2: Exchange authorization code for tokens<br>
+  ⑤ <strong>Refresh token</strong> をコピーして下に貼り付け</p>
+  <textarea id="token" placeholder="1//04..."></textarea>
+  <button onclick="save()">💾 保存する</button>
+  <p class="done" id="done">✅ 保存しました！カレンダー登録が使えるようになりました。</p>
+</div>
+<script>
+async function save(){
+  const token = document.getElementById('token').value.trim();
+  if(!token) return alert('トークンを入力してください');
+  const res = await fetch('/save-token', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({token})});
+  const data = await res.json();
+  if(data.status === 'ok') document.getElementById('done').style.display = 'block';
+  else alert('エラー: ' + (data.message || '不明'));
+}
+</script>
+</body></html>"""
+
+
+@app.post("/save-token")
+async def save_token_api(request: Request):
+    data = await request.json()
+    token = data.get("token", "").strip()
+    if not token:
+        return {"status": "error", "message": "token is required"}
+    try:
+        sb.table("contacts").upsert({"name": "__google_refresh_token__", "profile": token}).execute()
+        return {"status": "ok"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
 
 @app.get("/")
