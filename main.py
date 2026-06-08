@@ -360,13 +360,13 @@ async def _receive_message_inner(data: dict):
 
     async with httpx.AsyncClient(timeout=10) as http:
         await http.post(
-            f"https://ntfy.sh/{NTFY_CHANNEL}",
-            content=reply.encode("utf-8"),
-            headers={
-                "Title": urllib.parse.quote(f"{sender}への返信案"),
-                "Tags": "speech_balloon",
-                "Actions": f"view, Copy, {base_url}/copy?text={encoded_reply}&id={conv_id}",
-                "Content-Type": "text/plain; charset=utf-8"
+            "https://ntfy.sh",
+            json={
+                "topic": NTFY_CHANNEL,
+                "message": reply,
+                "title": f"{sender}への返信案",
+                "tags": ["speech_balloon"],
+                "actions": [{"action": "view", "label": "コピーページへ", "url": f"{base_url}/copy?text={encoded_reply}&id={conv_id}"}]
             }
         )
 
