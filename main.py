@@ -14,7 +14,7 @@ from supabase import create_client, Client
 app = FastAPI()
 
 GROQ_API_KEY = os.environ["GROQ_API_KEY"]
-NTFY_CHANNEL = os.environ.get("NTFY_CHANNEL", "line-reply-default")
+NTFY_CHANNEL = os.environ.get("NTFY_CHANNEL", "baaaayu-line-2024")
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 SUPABASE_URL = os.environ["SUPABASE_URL"]
@@ -279,6 +279,14 @@ async def receive_message(request: Request):
         data = json.loads(body.decode("utf-8", errors="replace"))
     except Exception:
         data = {}
+    try:
+        return await _receive_message_inner(data)
+    except Exception as e:
+        import traceback
+        return {"status": "error", "detail": str(e), "trace": traceback.format_exc()[-500:]}
+
+
+async def _receive_message_inner(data: dict):
     sender = data.get("sender", "不明").strip()
     message = data.get("message", "").strip()
 
