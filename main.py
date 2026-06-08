@@ -365,7 +365,8 @@ async def _receive_message_inner(data: dict):
             headers={
                 "Title": urllib.parse.quote(f"{sender}への返信案"),
                 "Tags": "speech_balloon",
-                "Actions": f"view, Copy, {base_url}/copy?text={encoded_reply}&id={conv_id}"
+                "Actions": f"view, Copy, {base_url}/copy?text={encoded_reply}&id={conv_id}",
+                "Content-Type": "text/plain; charset=utf-8"
             }
         )
 
