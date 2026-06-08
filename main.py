@@ -79,6 +79,30 @@ async def get_google_access_token() -> str:
         return data["access_token"]
 
 
+async def get_line_display_name(user_id: str) -> str:
+    if not LINE_CHANNEL_ACCESS_TOKEN or not user_id:
+        return user_id
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            res = await client.get(
+                f"https://api.line.me/v2/bot/profile/{user_id}",
+                headers={"Authorization": f"Bearer {LINE_CHANNEL_ACCESS_TOKEN}"}
+            )
+            return res.json().get("displayName", user_id)
+    except Exception:
+        return user_id
+
+
+async def get_calendar_color(user_id: str) -> str:
+    try:
+        res = sb.table("contacts").select("profile").eq("name", f"__line_color_{user_id}__").execute()
+        if res.data and res.data[0]["profile"]:
+            return res.data[0]["profile"]
+    except Exception:
+        pass
+    return "5"  # デフォルト: 黄色（悠太）
+
+
 def calc_end_time(start_time: str) -> str:
     h, m = map(int, start_time.split(":"))
     if h < 12:
@@ -130,7 +154,7 @@ async def extract_schedule(message: str) -> dict:
     return {}
 
 
-async def register_calendar_event(schedule: dict) -> str:
+async def register_calendar_event(schedule: dict, color_id: str = "5") -> str:
     access_token = await get_google_access_token()
 
     date = schedule["date"]
@@ -153,7 +177,7 @@ async def register_calendar_event(schedule: dict) -> str:
         "description": "\n".join(desc_parts),
         "start": {"dateTime": f"{date}T{start_time}:00+09:00", "timeZone": "Asia/Tokyo"},
         "end": {"dateTime": f"{date}T{end_time}:00+09:00", "timeZone": "Asia/Tokyo"},
-        "colorId": "5",
+        "colorId": color_id,
     }
 
     async with httpx.AsyncClient(timeout=15) as client:
@@ -199,8 +223,18 @@ async def line_webhook(request: Request):
 
         message = event["message"]["text"].strip()
         reply_token = event.get("replyToken", "")
+        user_id = event.get("source", {}).get("userId", "")
 
         try:
+            # ユーザー情報を保存（色設定ページで表示するため）
+            if user_id:
+                display_name = await get_line_display_name(user_id)
+                try:
+                    sb.table("contacts").upsert({"name": f"__line_user_{user_id}__", "profile": display_name}).execute()
+                except Exception:
+                    pass
+
+            color_id = await get_calendar_color(user_id)
             intent = await detect_intent(message)
 
             if intent == "schedule":
@@ -214,7 +248,7 @@ async def line_webhook(request: Request):
                 if missing:
                     reply = f"以下の情報が不足しています：{' / '.join(missing)}\nもう一度送ってください。"
                 else:
-                    end_time = await register_calendar_event(schedule)
+                    end_time = await register_calendar_event(schedule, color_id)
                     title = schedule.get("company", "")
                     if schedule.get("person"):
                         title += schedule["person"]
@@ -616,6 +650,71 @@ async def save_token_api(request: Request):
         return {"status": "ok"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
+
+
+@app.get("/set-user-color", response_class=HTMLResponse)
+async def set_user_color_page():
+    # LINEユーザー一覧を取得
+    try:
+        res = sb.table("contacts").select("name, profile").like("name", "__line_user_%").execute()
+        users = [{"user_id": r["name"].replace("__line_user_", "").replace("__", ""), "display_name": r["profile"]} for r in (res.data or [])]
+        # 各ユーザーの現在の色を取得
+        for u in users:
+            cr = sb.table("contacts").select("profile").eq("name", f"__line_color_{u['user_id']}__").execute()
+            u["color"] = cr.data[0]["profile"] if cr.data else "5"
+    except Exception:
+        users = []
+
+    color_options = [
+        ("1", "ラベンダー"), ("2", "セージ"), ("3", "グレープ"), ("4", "フラミンゴ"),
+        ("5", "バナナ（黄・悠太）"), ("6", "タンジェリン"), ("7", "ピーコック"),
+        ("8", "グラファイト（グレー）"), ("9", "ブルーベリー（青）"), ("10", "バジル"),
+        ("11", "トマト（赤・英三）"),
+    ]
+
+    rows = ""
+    for u in users:
+        opts = "".join(f'<option value="{v}" {"selected" if v == u["color"] else ""}>{label}</option>' for v, label in color_options)
+        rows += f"""
+<div class="card">
+  <p><strong>{u['display_name']}</strong></p>
+  <select id="color_{u['user_id']}">{opts}</select>
+  <button onclick="save('{u['user_id']}')">保存</button>
+  <span id="done_{u['user_id']}" style="color:#06c755;display:none">✅</span>
+</div>"""
+
+    if not rows:
+        rows = "<div class='card'><p>まだメッセージを送ったユーザーがいません</p></div>"
+
+    return f"""<!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ユーザー色設定</title>
+<style>body{{font-family:sans-serif;padding:16px;background:#f0f0f0;max-width:500px;margin:0 auto}}
+.card{{background:white;border-radius:16px;padding:20px;box-shadow:0 2px 8px rgba(0,0,0,.1);margin-bottom:12px}}
+select{{width:100%;padding:10px;font-size:15px;border:1px solid #ddd;border-radius:8px;margin:8px 0}}
+button{{width:100%;padding:12px;font-size:16px;border:none;border-radius:12px;background:#06c755;color:white;cursor:pointer}}</style>
+</head><body>
+<h2>🎨 カレンダー色設定</h2>
+<p style="color:#999;font-size:13px">LINEでメッセージを送ったユーザーに色を割り当てます</p>
+{rows}
+<script>
+async function save(userId){{
+  const color = document.getElementById('color_' + userId).value;
+  await fetch('/set-user-color', {{method:'POST', headers:{{'Content-Type':'application/json'}}, body:JSON.stringify({{user_id:userId, color}})}});
+  document.getElementById('done_' + userId).style.display = 'inline';
+}}
+</script></body></html>"""
+
+
+@app.post("/set-user-color")
+async def set_user_color(request: Request):
+    data = await request.json()
+    user_id = data.get("user_id", "").strip()
+    color = data.get("color", "5").strip()
+    if not user_id:
+        return {"status": "error"}
+    sb.table("contacts").upsert({"name": f"__line_color_{user_id}__", "profile": color}).execute()
+    return {"status": "ok"}
 
 
 @app.get("/debug-auth")
