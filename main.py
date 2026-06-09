@@ -13,9 +13,9 @@ from supabase import create_client, Client
 
 app = FastAPI()
 
-GROQ_API_KEY = os.environ["GROQ_API_KEY"]
+GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
 NTFY_CHANNEL = "baaaayu-line-2024"
-GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
+GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
 
 SUPABASE_URL = os.environ["SUPABASE_URL"]
 SUPABASE_KEY = os.environ["SUPABASE_KEY"]
@@ -35,22 +35,22 @@ async def ask_groq(prompt: str, max_tokens: int = 300, system: str = None) -> st
         messages.append({"role": "system", "content": system})
     messages.append({"role": "user", "content": prompt})
     payload = {
-        "model": "llama-3.3-70b-versatile",
+        "model": "gemini-2.0-flash",
         "messages": messages,
         "max_tokens": max_tokens,
         "temperature": 0.7
     }
     async with httpx.AsyncClient(timeout=30) as http:
         res = await http.post(
-            GROQ_URL,
+            GEMINI_URL,
             json=payload,
-            headers={"Authorization": f"Bearer {GROQ_API_KEY}"}
+            headers={"Authorization": f"Bearer {GEMINI_API_KEY}"}
         )
         data = res.json()
     try:
         return data["choices"][0]["message"]["content"].strip()
     except Exception as e:
-        raise RuntimeError(f"Groq failed: status={res.status_code} body={json.dumps(data, ensure_ascii=False)[:500]} exc={e}")
+        raise RuntimeError(f"Gemini failed: status={res.status_code} body={json.dumps(data, ensure_ascii=False)[:500]} exc={e}")
 
 
 async def get_google_access_token() -> str:
@@ -759,8 +759,8 @@ async def debug_auth():
     }
 
 
-@app.get("/test-groq")
-async def test_groq():
+@app.get("/test-ai")
+async def test_ai():
     result = await ask_groq("「おけ！また後でね」とだけ返してください")
     return {"result": result, "repr": repr(result)}
 
