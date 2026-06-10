@@ -273,12 +273,17 @@ async def line_webhook(request: Request):
 
 
 @app.post("/webhook")
-async def receive_message(request: Request):
+async def receive_message(request: Request, sender: str = None, message: str = None):
     try:
         body = await request.body()
-        data = json.loads(body.decode("utf-8", errors="replace"))
+        data = json.loads(body.decode("utf-8", errors="replace")) if body else {}
     except Exception:
         data = {}
+    # URLパラメータが優先（MacroDroidでは{triggertext1}がURLで確実に展開される）
+    if sender:
+        data["sender"] = sender
+    if message:
+        data["message"] = message
     try:
         return await _receive_message_inner(data)
     except Exception as e:
