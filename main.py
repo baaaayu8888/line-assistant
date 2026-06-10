@@ -13,9 +13,8 @@ from supabase import create_client, Client
 
 app = FastAPI()
 
-GROQ_API_KEY = os.environ["GROQ_API_KEY"]
+ANTHROPIC_API_KEY = os.environ["ANTHROPIC_API_KEY"]
 NTFY_CHANNEL = "baaaayu-line-2024"
-GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 SUPABASE_URL = os.environ["SUPABASE_URL"]
 SUPABASE_KEY = os.environ["SUPABASE_KEY"]
@@ -29,28 +28,29 @@ GOOGLE_REFRESH_TOKEN = os.environ.get("GOOGLE_REFRESH_TOKEN", "")
 CALENDAR_ID = os.environ.get("CALENDAR_ID", "nakashibakogyo@gmail.com")
 
 
-async def ask_groq(prompt: str, max_tokens: int = 300, system: str = None) -> str:
-    messages = []
-    if system:
-        messages.append({"role": "system", "content": system})
-    messages.append({"role": "user", "content": prompt})
+async def ask_claude(prompt: str, max_tokens: int = 300, system: str = None) -> str:
     payload = {
-        "model": "llama-3.3-70b-versatile",
-        "messages": messages,
+        "model": "claude-haiku-4-5-20251001",
         "max_tokens": max_tokens,
-        "temperature": 0.7
+        "messages": [{"role": "user", "content": prompt}],
     }
+    if system:
+        payload["system"] = system
     async with httpx.AsyncClient(timeout=30) as http:
         res = await http.post(
-            GROQ_URL,
+            "https://api.anthropic.com/v1/messages",
             json=payload,
-            headers={"Authorization": f"Bearer {GROQ_API_KEY}"}
+            headers={
+                "x-api-key": ANTHROPIC_API_KEY,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json",
+            }
         )
         data = res.json()
     try:
-        return data["choices"][0]["message"]["content"].strip()
+        return data["content"][0]["text"].strip()
     except Exception as e:
-        raise RuntimeError(f"Groq failed: status={res.status_code} body={json.dumps(data, ensure_ascii=False)[:500]} exc={e}")
+        raise RuntimeError(f"Claude failed: status={res.status_code} body={json.dumps(data, ensure_ascii=False)[:500]} exc={e}")
 
 
 async def get_google_access_token() -> str:
@@ -123,7 +123,7 @@ async def detect_intent(message: str) -> str:
 メッセージ：{message}
 
 「schedule」または「reply」の1単語のみで答えてください。"""
-    result = await ask_groq(prompt, max_tokens=10)
+    result = await ask_claude(prompt, max_tokens=10)
     return "schedule" if "schedule" in result.lower() else "reply"
 
 
@@ -144,7 +144,7 @@ async def extract_schedule(message: str) -> dict:
   "map_url": "GoogleマップURL（あれば）",
   "notes": "注意事項（あれば）"
 }}"""
-    result = await ask_groq(prompt, max_tokens=400)
+    result = await ask_claude(prompt, max_tokens=400)
     try:
         match = re.search(r'\{.*\}', result, re.DOTALL)
         if match:
@@ -259,7 +259,7 @@ async def line_webhook(request: Request):
                         schedule.get("location", ""),
                     ]))
             else:
-                reply = await ask_groq(
+                reply = await ask_claude(
                     f"以下のLINEメッセージに自然な短い返信を1文で:\n{message}"
                 )
         except Exception as e:
@@ -355,7 +355,7 @@ async def _receive_message_inner(data: dict):
     user_parts.append("悠太の返信文：")
     user_prompt = "\n".join(user_parts)
 
-    reply = await ask_groq(user_prompt, system=system_prompt)
+    reply = await ask_claude(user_prompt, system=system_prompt)
 
     # 会話を保存
     res = sb.table("conversations").insert({
@@ -576,7 +576,7 @@ LINEの返信を考えるときに役立つ情報を5〜8文でまとめてく�
 
 プロフィール文のみ出力してください。"""
 
-        profile = await ask_groq(prompt)
+        profile = await ask_claude(prompt)
 
         sb.table("contacts").upsert({"name": contact_name, "profile": profile}).execute()
 
@@ -761,7 +761,7 @@ async def debug_auth():
 
 @app.get("/test-ai")
 async def test_ai():
-    result = await ask_groq("「おけ！また後でね」とだけ返してください")
+    result = await ask_claude("「おけ！また後でね」とだけ返してください")
     return {"result": result, "repr": repr(result)}
 
 
