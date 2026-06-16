@@ -11,6 +11,15 @@ Codex への渡し方（どれでも可）:
 先行レビューは Claude による一次診断であり、確定不具合とは限らない。Codex 側で
 **再現・裏取りしてから**対応すること（＝二重チェック）。
 
+> **2026-06 更新**: 旧「LINE 自動返信アシスタント」機能（`/webhook`, `/latest`, `/copy`,
+> `/feedback`, `/upload`, `/analyze`, `/set_profile`, `/contacts`, `/test-ai`, `/debug-auth`）は
+> アーカイブ済みのため **削除済み**。それらに紐づく指摘（システム 2/5/6/7/8、🔴1/3 の一部、
+> 🟡4/5）は **対象外**。現存は スケジュール Bot + `/save-token` + `/set-user-color` のみで、
+> 管理エンドポイントは `ADMIN_TOKEN` ゲートで保護済み。
+> **いま Codex に見てほしいのは下記の残課題**: 🔴2(save-token ゲートの妥当性) /
+> 🟡6(calc_end_time 日跨ぎ) / 🟡7(HTTP ステータス未チェック) / ⚪8(設定残骸) /
+> ⚪10(extract_schedule の貪欲マッチ) / `/set-user-color` ゲートの抜け道。
+
 ---
 
 ## A. システム別チェックリスト

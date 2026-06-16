@@ -5,32 +5,31 @@
 
 ## このプロジェクトは何か
 
-中芝悠太（大阪・施工業）向けの個人用 LINE アシスタント。FastAPI 1 ファイル（`main.py`）に
-複数の機能が同居しており、Cloud Run（本番）/ Render（予備）で動く。
+中芝悠太（大阪・施工業）向けの個人用ツール。FastAPI 1 ファイル（`main.py`）で動く
+**スケジュール登録 Bot**。LINE に施工予定を送ると、内容を抽出して Google カレンダーに
+色分け登録する。Cloud Run（本番）で稼働。
+
+> 旧「LINE 自動返信アシスタント」機能（MacroDroid→ntfy→コピーの返信案生成、履歴解析、
+> 連絡先プロフィール等）はアーカイブ済みのため **2026-06 に削除**した。現存するのは
+> スケジュール系のみ。
 
 - 本番 URL: `https://line-assistant-ncpnpxg3hq-an.a.run.app`
 - 言語/FW: Python 3.11 / FastAPI / httpx（同期 SDK は使わず REST 直叩き）
-- データ: Supabase（`contacts`, `conversations`, `corrections` テーブル）
+- データ: Supabase（`contacts` テーブルにトークン・色設定・LINE ユーザー名を保存）
 - AI: Anthropic Claude Haiku（`claude-haiku-4-5-20251001`）を REST で呼び出し
-- 通知: ntfy.sh（返信案をスマホへプッシュ）
 
 ## システム（機能）一覧
 
-`main.py` 内に同居している「システム」は実質これだけある。レビュー時はこの単位で見ると漏れない。
-
 | # | システム | 入口 | 主な関数 |
 |---|---------|------|---------|
-| 1 | LINE Bot 本体（受信→意図判定→AI返信 or 予定登録） | `POST /line-webhook` | `line_webhook` |
-| 2 | MacroDroid 通知連携（通知文→返信案→ntfy） | `POST /webhook` | `receive_message`, `_receive_message_inner` |
-| 3 | AI 返信生成（敬語/関西弁の自動切替） | — | `ask_claude`, `detect_intent` |
-| 4 | 予定抽出→Google カレンダー登録（色ルール付き） | — | `extract_schedule`, `register_calendar_event`, `calc_end_time` |
-| 5 | 返信案ビューア／コピー | `GET /latest`, `GET /copy` | `latest_page`, `copy_page` |
-| 6 | フィードバック学習（修正履歴の蓄積） | `POST /feedback` | `save_feedback` |
-| 7 | LINE 履歴アップロード解析→プロフィール生成 | `GET /upload`, `POST /analyze` | `upload_page`, `analyze_history` |
-| 8 | 連絡先プロフィール管理 | `GET /contacts`, `POST /set_profile` | `contacts_page`, `set_profile` |
-| 9 | ユーザー別カレンダー色設定 | `GET/POST /set-user-color` | `set_user_color_page`, `set_user_color` |
-| 10 | Google リフレッシュトークン管理 | `GET/POST /save-token` | `save_token_*`, `get_google_access_token` |
-| 11 | デバッグ系 | `GET /debug-auth`, `GET /test-ai`, `GET /` | — |
+| 1 | スケジュール Bot（LINE 受信→予定抽出→カレンダー登録） | `POST /line-webhook` | `line_webhook`, `detect_intent`, `extract_schedule`, `register_calendar_event`, `calc_end_time` |
+| 2 | AI 抽出基盤（意図判定・予定抽出） | — | `ask_claude` |
+| 3 | Google リフレッシュトークン管理（要 ADMIN_TOKEN） | `GET/POST /save-token` | `save_token_*`, `get_google_access_token` |
+| 4 | ユーザー別カレンダー色設定（要 ADMIN_TOKEN） | `GET/POST /set-user-color` | `set_user_color_*`, `get_calendar_color` |
+| 5 | 稼働確認 | `GET /` | `root` |
+
+管理用エンドポイント（`/save-token`, `/set-user-color`）は `ADMIN_TOKEN` ゲートで保護。
+`?key=<ADMIN_TOKEN>` を付けて開く。未設定時は fail-closed（常に 401）。
 
 デプロイ基盤: `.github/workflows/deploy.yml`（main push で Cloud Run）, `setup/deploy.sh`,
 `Dockerfile`, `render.yaml`。
