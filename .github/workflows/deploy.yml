@@ -40,7 +40,8 @@ jobs:
           GOOGLE_CLIENT_ID=${{ secrets.GOOGLE_CLIENT_ID }},\
           GOOGLE_CLIENT_SECRET=${{ secrets.GOOGLE_CLIENT_SECRET }},\
           GOOGLE_REFRESH_TOKEN=${{ secrets.GOOGLE_REFRESH_TOKEN }},\
-          CALENDAR_ID=${{ secrets.CALENDAR_ID }}"
+          CALENDAR_ID=${{ secrets.CALENDAR_ID }},\
+          ADMIN_TOKEN=${{ secrets.ADMIN_TOKEN }}"
 
       - name: Show URL
         run: |

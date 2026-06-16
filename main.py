@@ -1,5 +1,5 @@
-from fastapi import FastAPI, UploadFile, File, Request, HTTPException
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi import FastAPI, Request, HTTPException
+from fastapi.responses import HTMLResponse
 import httpx
 import json
 import os
@@ -14,7 +14,6 @@ from supabase import create_client, Client
 app = FastAPI()
 
 ANTHROPIC_API_KEY = os.environ["ANTHROPIC_API_KEY"]
-NTFY_CHANNEL = "baaaayu-line-2024"
 
 SUPABASE_URL = os.environ["SUPABASE_URL"]
 SUPABASE_KEY = os.environ["SUPABASE_KEY"]
@@ -26,6 +25,17 @@ GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
 GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "")
 GOOGLE_REFRESH_TOKEN = os.environ.get("GOOGLE_REFRESH_TOKEN", "")
 CALENDAR_ID = os.environ.get("CALENDAR_ID", "nakashibakogyo@gmail.com")
+
+# 管理用エンドポイントのアクセスゲート。
+# 認証情報・設定を扱うページ/APIは ADMIN_TOKEN を要求する（未設定なら常に拒否＝fail-closed）。
+ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "")
+
+
+def require_admin(request: Request, key: str = ""):
+    """key クエリ or X-Admin-Token ヘッダが ADMIN_TOKEN と一致しなければ 401。"""
+    provided = key or request.headers.get("X-Admin-Token", "")
+    if not (ADMIN_TOKEN and hmac.compare_digest(provided, ADMIN_TOKEN)):
+        raise HTTPException(status_code=401, detail="unauthorized")
 
 
 async def ask_claude(prompt: str, max_tokens: int = 300, system: str = None) -> str:
@@ -259,9 +269,7 @@ async def line_webhook(request: Request):
                         schedule.get("location", ""),
                     ]))
             else:
-                reply = await ask_claude(
-                    f"以下のLINEメッセージに自然な短い返信を1文で:\n{message}"
-                )
+                reply = "予定として登録する場合は、日付・時間・会社名（または作業内容）を含めて送ってください。"
         except Exception as e:
             import traceback
             print(f"ERROR processing LINE message: {traceback.format_exc()}")
@@ -272,359 +280,9 @@ async def line_webhook(request: Request):
     return {"status": "ok"}
 
 
-@app.post("/webhook")
-async def receive_message(request: Request, sender: str = None, message: str = None):
-    try:
-        body = await request.body()
-        data = json.loads(body.decode("utf-8", errors="replace")) if body else {}
-    except Exception:
-        data = {}
-    # URLパラメータが優先（MacroDroidでは{triggertext1}がURLで確実に展開される）
-    if sender:
-        data["sender"] = sender
-    if message:
-        data["message"] = message
-    try:
-        return await _receive_message_inner(data)
-    except Exception as e:
-        import traceback
-        return {"status": "error", "detail": str(e), "trace": traceback.format_exc()[-500:]}
-
-
-async def _receive_message_inner(data: dict):
-    sender = data.get("sender", "不明").strip()
-    message = data.get("message", "").strip()
-
-    if not message:
-        message = "（メッセージ内容を取得できませんでした）"
-
-    # プロフィール取得
-    res = sb.table("contacts").select("profile").eq("name", sender).execute()
-    profile = res.data[0]["profile"] if res.data else None
-
-    # 直近の会話取得
-    res = sb.table("conversations").select("their_message, actual_reply") \
-        .eq("contact", sender).not_.is_("actual_reply", "null") \
-        .order("timestamp", desc=True).limit(5).execute()
-    recent = list(reversed(res.data)) if res.data else []
-
-    # 修正履歴取得
-    res = sb.table("corrections").select("suggested, corrected") \
-        .eq("contact", sender).order("timestamp", desc=True).limit(3).execute()
-    corrections = res.data if res.data else []
-
-    # システムプロンプト構築
-    system_parts = [
-        "あなたはLINE返信の文案を考えるアシスタントです。",
-        f"ユーザー（中芝悠太、大阪在住）が{sender}に送る返信文を1つ提案してください。",
-        "",
-        "【悠太の文体・口調（必ず再現すること）】",
-        "- 友人・家族相手：関西弁全開。「〜やん」「〜やな」「〜ねん」「〜やけど」「〜やわ」「〜しといて」「〜てや」「〜やろ」",
-        "- 口癖：「おけ！」「りょうかい！」「ほーい」「さんきゅー」「なるほど」「理解！」「笑」「わら」「おけまる」",
-        "- 短文スタイル：1〜2文。複数のことを言いたければ短く分ける",
-        "- 顧客・取引先相手：「お世話になります」「かしこまりました」「承知いたしました」を使う、簡潔な敬語",
-        "- 相手情報に「顧客」「取引先」「ビジネス」が含まれない限り関西弁で返す",
-        "- 相手のメッセージが敬語・丁寧語（です・ます調、〜していただく、〜でしょうか、お世話になります等）を使っている場合は、相手情報に関わらず必ず敬語で返す",
-        "",
-        "【悠太の返信例】",
-        "友人へ：「おけ！」「なるほどな笑」「ほんでどうなったん？」「りょうかい！！」「えーそれきついな笑」「おけまる！」",
-        "家族へ：「ほーい」「おけー」「さんきゅー」「またおくっとくわ」「なんじ？」",
-        "顧客へ：「お世話になります。かしこまりました！」「承知いたしました。」「ありがとうございます！」",
-        "",
-        "【返信ルール】",
-        "- 返信文のみ出力。前置き・説明・「返信:」などの見出し・引用符は一切不要",
-        "- 質問には答える。報告・近況には共感・相槌で返す。依頼には了承や反応を返す",
-        "- 「お風呂はいってた」「寝てた」「外出してた」などの状況報告 → 「そかそか！」「おつかれ〜」「ゆっくりできた？」のように相槌で返す。的外れな質問（何時？等）は絶対にしない",
-        "- 具体的な情報（帰宅時間・場所など）がわからない場合は曖昧でも自然に返す。知らないことを質問責めにしない",
-        "- 日本語のみで出力する",
-    ]
-    if profile:
-        system_parts += ["", f"【{sender}について】", profile]
-    else:
-        system_parts += ["", f"【{sender}】: 詳細不明。友人として関西弁・短文で返す"]
-    if corrections:
-        system_parts.append("\n【過去の修正（この反省を活かす）】")
-        for row in corrections:
-            system_parts.append(f"- NG:「{row['suggested']}」→ OK:「{row['corrected']}」")
-    system_prompt = "\n".join(system_parts)
-
-    # ユーザープロンプト構築
-    user_parts = []
-    if recent:
-        user_parts.append("【直近の会話の流れ（参考）】")
-        for row in recent:
-            user_parts.append(f"{sender}: {row['their_message']}")
-            user_parts.append(f"悠太: {row['actual_reply']}")
-        user_parts.append("")
-    user_parts.append(f"{sender}からのメッセージ：{message}")
-    user_parts.append("")
-    user_parts.append("悠太の返信文：")
-    user_prompt = "\n".join(user_parts)
-
-    reply = await ask_claude(user_prompt, system=system_prompt)
-
-    # 会話を保存
-    res = sb.table("conversations").insert({
-        "contact": sender,
-        "their_message": message,
-        "suggested_reply": reply,
-        "timestamp": datetime.now().isoformat()
-    }).execute()
-    conv_id = res.data[0]["id"] if res.data else 0
-
-    base_url = os.environ.get("BASE_URL", "https://line-assistant-ncpnpxg3hq-an.a.run.app")
-    encoded_reply = urllib.parse.quote(reply)
-
-    async with httpx.AsyncClient(timeout=10) as http:
-        await http.post(
-            "https://ntfy.sh",
-            json={
-                "topic": NTFY_CHANNEL,
-                "message": reply,
-                "title": f"{sender}への返信案",
-                "tags": ["speech_balloon"],
-                "actions": [{"action": "view", "label": "コピーページへ", "url": f"{base_url}/copy?text={encoded_reply}&id={conv_id}"}]
-            }
-        )
-
-    return {"status": "ok", "reply": reply, "conv_id": conv_id}
-
-
-@app.get("/latest", response_class=HTMLResponse)
-async def latest_page():
-    res = sb.table("conversations").select("contact, their_message, suggested_reply, timestamp, id") \
-        .order("timestamp", desc=True).limit(10).execute()
-    rows = res.data if res.data else []
-
-    cards = ""
-    for row in rows:
-        contact = row["contact"]
-        their_msg = row["their_message"]
-        reply = row["suggested_reply"]
-        ts = row["timestamp"]
-        conv_id = row["id"]
-        escaped_reply = reply.replace('"', '&quot;').replace('<', '&lt;').replace('>', '&gt;')
-        encoded = urllib.parse.quote(reply)
-        cards += f"""
-<div class="card">
-  <p class="meta">{ts[:16]} ／ <strong>{contact}</strong>「{their_msg[:30]}」</p>
-  <div class="msg">{escaped_reply}</div>
-  <a href="/copy?text={encoded}&id={conv_id}"><button>📋 コピーページへ</button></a>
-</div>"""
-
-    if not cards:
-        cards = "<div class='card'><p>まだ返信案がありません</p></div>"
-
-    return f"""<!DOCTYPE html>
-<html lang="ja">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="refresh" content="30">
-<title>最新の返信案</title>
-<style>
-  body{{font-family:sans-serif;padding:16px;background:#f0f0f0;max-width:500px;margin:0 auto}}
-  .card{{background:white;border-radius:16px;padding:20px;box-shadow:0 2px 8px rgba(0,0,0,.1);margin-bottom:12px}}
-  .meta{{color:#999;font-size:12px;margin:0 0 8px}}
-  .msg{{font-size:18px;line-height:1.6;color:#222;background:#e8f5e9;border-radius:12px;padding:12px;word-break:break-all}}
-  button{{width:100%;padding:14px;font-size:16px;border:none;border-radius:12px;background:#06c755;color:white;cursor:pointer;margin-top:10px}}
-  a{{text-decoration:none}}
-  h2{{color:#333;margin:0 0 16px}}
-</style>
-</head>
-<body>
-<h2>💬 最新の返信案</h2>
-<p style="color:#999;font-size:12px;margin:-8px 0 16px">30秒ごとに自動更新</p>
-{cards}
-</body></html>"""
-
-
-@app.get("/copy", response_class=HTMLResponse)
-async def copy_page(text: str = "", id: int = 0):
-    escaped = text.replace('"', '&quot;').replace('<', '&lt;').replace('>', '&gt;')
-    return f"""<!DOCTYPE html>
-<html lang="ja">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>返信案</title>
-<style>
-  body{{font-family:sans-serif;padding:20px;background:#f0f0f0;max-width:500px;margin:0 auto}}
-  .card{{background:white;border-radius:16px;padding:24px;box-shadow:0 2px 8px rgba(0,0,0,.1);margin-bottom:16px}}
-  .msg{{font-size:20px;line-height:1.6;margin:16px 0;color:#222;word-break:break-all;background:#e8f5e9;border-radius:12px;padding:16px}}
-  button{{width:100%;padding:16px;font-size:18px;border:none;border-radius:12px;background:#06c755;color:white;cursor:pointer;margin:6px 0}}
-  button.gray{{background:#aaa}}
-  .done{{color:#06c755;font-weight:bold;display:none;text-align:center;margin-top:8px;font-size:16px}}
-  textarea{{width:100%;box-sizing:border-box;padding:12px;font-size:16px;border:1px solid #ddd;border-radius:8px;margin-top:8px}}
-  hr{{border:none;border-top:1px solid #eee;margin:16px 0}}
-  p.hint{{color:#999;font-size:13px;margin:4px 0}}
-</style>
-</head>
-<body>
-<div class="card">
-  <p style="color:#666;margin:0;font-size:14px">返信案</p>
-  <div class="msg" id="msg">{escaped}</div>
-  <button onclick="copyText()">📋 クリップボードにコピー</button>
-  <p class="done" id="done">✅ コピーしました！LINEに貼り付けて送信してください</p>
-  <hr>
-  <p class="hint">修正して送った場合は記録できます（次回の返信が改善されます）</p>
-  <textarea id="actual" placeholder="実際に送った内容..." rows="3"></textarea>
-  <button class="gray" onclick="sendFeedback({id})">📝 修正内容を記録する</button>
-  <p class="done" id="fb-done">✅ 記録しました！</p>
-</div>
-<script>
-function copyText(){{
-  navigator.clipboard.writeText(document.getElementById('msg').innerText)
-    .then(()=>document.getElementById('done').style.display='block');
-}}
-async function sendFeedback(convId){{
-  const actual=document.getElementById('actual').value.trim();
-  if(!actual)return alert('内容を入力してください');
-  await fetch('/feedback',{{method:'POST',headers:{{'Content-Type':'application/json'}},
-    body:JSON.stringify({{conv_id:convId,actual_reply:actual}})}});
-  document.getElementById('fb-done').style.display='block';
-}}
-</script>
-</body></html>"""
-
-
-@app.post("/feedback")
-async def save_feedback(request: Request):
-    data = await request.json()
-    conv_id = data.get("conv_id")
-    actual_reply = data.get("actual_reply", "").strip()
-
-    res = sb.table("conversations").select("contact, suggested_reply").eq("id", conv_id).execute()
-    if res.data:
-        contact = res.data[0]["contact"]
-        suggested = res.data[0]["suggested_reply"]
-        sb.table("conversations").update({"actual_reply": actual_reply}).eq("id", conv_id).execute()
-        if actual_reply and actual_reply != suggested:
-            sb.table("corrections").insert({
-                "contact": contact,
-                "suggested": suggested,
-                "corrected": actual_reply,
-                "timestamp": datetime.now().isoformat()
-            }).execute()
-    return {"status": "ok"}
-
-
-@app.get("/upload", response_class=HTMLResponse)
-async def upload_page():
-    return """<!DOCTYPE html>
-<html lang="ja">
-<head>
-<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>LINE履歴アップロード</title>
-<style>
-  body{font-family:sans-serif;padding:20px;background:#f0f0f0;max-width:600px;margin:0 auto}
-  .card{background:white;border-radius:16px;padding:24px;box-shadow:0 2px 8px rgba(0,0,0,.1);margin-bottom:16px}
-  button{width:100%;padding:16px;font-size:18px;border:none;border-radius:12px;background:#06c755;color:white;cursor:pointer;margin-top:12px}
-  .profile-card{background:#f9f9f9;border-radius:8px;padding:16px;margin:8px 0;border-left:4px solid #06c755}
-  input[type=file]{width:100%;padding:12px;box-sizing:border-box;font-size:16px}
-</style>
-</head>
-<body>
-<div class="card">
-  <h2>📂 LINE履歴をアップロード</h2>
-  <p>LINEの「トーク履歴を送信」で取り出した .txt ファイルを選んでください。複数まとめて選べます。</p>
-  <input type="file" id="files" multiple accept=".txt">
-  <button onclick="upload()">🔍 分析開始</button>
-</div>
-<div id="result"></div>
-<script>
-async function upload(){
-  const files=document.getElementById('files').files;
-  if(!files.length)return alert('ファイルを選択してください');
-  const form=new FormData();
-  for(const f of files)form.append('files',f);
-  document.getElementById('result').innerHTML='<div class="card"><p>⏳ 分析中...</p></div>';
-  const res=await fetch('/analyze',{method:'POST',body:form});
-  const data=await res.json();
-  let html='<div class="card"><h3>✅ 分析完了！</h3>';
-  for(const item of data.analyzed)
-    html+=`<div class="profile-card"><strong>${item.name}</strong><p>${item.profile}</p></div>`;
-  html+='</div>';
-  document.getElementById('result').innerHTML=html;
-}
-</script>
-</body></html>"""
-
-
-@app.post("/analyze")
-async def analyze_history(files: list[UploadFile] = File(...)):
-    results = []
-    for file in files:
-        content = await file.read()
-        text = content.decode("utf-8", errors="ignore")
-
-        filename = file.filename or ""
-        name_match = re.search(r'\[LINE\]\s*(.+?)とのトーク', filename) or \
-                     re.search(r'LINE_(.+?)のトーク', filename)
-        contact_name = name_match.group(1).strip() if name_match else filename.replace(".txt", "").strip()
-
-        # 全履歴から均等にサンプリング（冒頭・中間・最新）
-        lines = text.splitlines()
-        total = len(lines)
-        if total <= 300:
-            sample = text
-        else:
-            head = "\n".join(lines[:100])
-            mid = "\n".join(lines[total // 2 - 50: total // 2 + 50])
-            tail = "\n".join(lines[-100:])
-            sample = f"{head}\n\n...(中略)...\n\n{mid}\n\n...(中略)...\n\n{tail}"
-
-        prompt = f"""以下はLINEトーク履歴のサンプルです（冒頭・中間・最新を抜粋）。
-この相手との関係性・口調・よく話す話題・絵文字の傾向・返信するときの注意点を分析し、
-LINEの返信を考えるときに役立つ情報を5〜8文でまとめてください。
-
-{sample[:6000]}
-
-プロフィール文のみ出力してください。"""
-
-        profile = await ask_claude(prompt)
-
-        sb.table("contacts").upsert({"name": contact_name, "profile": profile}).execute()
-
-        results.append({"name": contact_name, "profile": profile})
-
-    return {"analyzed": results}
-
-
-@app.post("/set_profile")
-async def set_profile(request: Request):
-    """Claude等が直接プロフィールを書き込む用エンドポイント"""
-    data = await request.json()
-    name = data.get("name", "").strip()
-    profile = data.get("profile", "").strip()
-    if not name or not profile:
-        return {"status": "error", "message": "name と profile は必須"}
-    sb.table("contacts").upsert({"name": name, "profile": profile}).execute()
-    return {"status": "ok", "name": name}
-
-
-@app.get("/contacts", response_class=HTMLResponse)
-async def contacts_page():
-    res = sb.table("contacts").select("name, profile").order("name").execute()
-    rows = res.data if res.data else []
-    cards = ""
-    for row in rows:
-        name = row["name"].replace("<", "&lt;").replace(">", "&gt;")
-        profile = (row["profile"] or "").replace("<", "&lt;").replace(">", "&gt;").replace("\n", "<br>")
-        cards += f'<div class="card"><h3>{name}</h3><p>{profile}</p></div>'
-    if not cards:
-        cards = "<div class='card'><p>まだ登録なし</p></div>"
-    return f"""<!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>連絡先プロフィール</title>
-<style>body{{font-family:sans-serif;padding:16px;background:#f0f0f0;max-width:600px;margin:0 auto}}
-.card{{background:white;border-radius:16px;padding:20px;box-shadow:0 2px 8px rgba(0,0,0,.1);margin-bottom:12px}}
-h3{{margin:0 0 8px;color:#333}}p{{color:#555;font-size:14px;line-height:1.6;margin:0}}</style>
-</head><body><h2>👥 連絡先プロフィール</h2>{cards}</body></html>"""
-
-
 @app.get("/save-token", response_class=HTMLResponse)
-async def save_token_page():
+async def save_token_page(request: Request, key: str = ""):
+    require_admin(request, key)
     return """<!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -653,10 +311,11 @@ async def save_token_page():
   <p class="done" id="done">✅ 保存しました！カレンダー登録が使えるようになりました。</p>
 </div>
 <script>
+const KEY = new URLSearchParams(location.search).get('key') || '';
 async function save(){
   const token = document.getElementById('token').value.trim();
   if(!token) return alert('トークンを入力してください');
-  const res = await fetch('/save-token', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({token})});
+  const res = await fetch('/save-token', {method:'POST', headers:{'Content-Type':'application/json','X-Admin-Token':KEY}, body: JSON.stringify({token})});
   const data = await res.json();
   if(data.status === 'ok') document.getElementById('done').style.display = 'block';
   else alert('エラー: ' + (data.message || '不明'));
@@ -667,6 +326,7 @@ async function save(){
 
 @app.post("/save-token")
 async def save_token_api(request: Request):
+    require_admin(request)
     data = await request.json()
     token = data.get("token", "").strip()
     if not token:
@@ -679,7 +339,8 @@ async def save_token_api(request: Request):
 
 
 @app.get("/set-user-color", response_class=HTMLResponse)
-async def set_user_color_page():
+async def set_user_color_page(request: Request, key: str = ""):
+    require_admin(request, key)
     # LINEユーザー一覧を取得
     try:
         res = sb.table("contacts").select("name, profile").like("name", "__line_user_%").execute()
@@ -724,9 +385,10 @@ button{{width:100%;padding:12px;font-size:16px;border:none;border-radius:12px;ba
 <p style="color:#999;font-size:13px">LINEでメッセージを送ったユーザーに色を割り当てます</p>
 {rows}
 <script>
+const KEY = new URLSearchParams(location.search).get('key') || '';
 async function save(userId){{
   const color = document.getElementById('color_' + userId).value;
-  await fetch('/set-user-color', {{method:'POST', headers:{{'Content-Type':'application/json'}}, body:JSON.stringify({{user_id:userId, color}})}});
+  await fetch('/set-user-color', {{method:'POST', headers:{{'Content-Type':'application/json','X-Admin-Token':KEY}}, body:JSON.stringify({{user_id:userId, color}})}});
   document.getElementById('done_' + userId).style.display = 'inline';
 }}
 </script></body></html>"""
@@ -734,6 +396,7 @@ async function save(userId){{
 
 @app.post("/set-user-color")
 async def set_user_color(request: Request):
+    require_admin(request)
     data = await request.json()
     user_id = data.get("user_id", "").strip()
     color = data.get("color", "5").strip()
@@ -743,34 +406,6 @@ async def set_user_color(request: Request):
     return {"status": "ok"}
 
 
-@app.get("/debug-auth")
-async def debug_auth():
-    supabase_token = "NOT FOUND"
-    try:
-        res = sb.table("contacts").select("profile").eq("name", "__google_refresh_token__").execute()
-        if res.data and res.data[0]["profile"]:
-            t = res.data[0]["profile"]
-            supabase_token = t[:15] + "..." + t[-4:]
-    except Exception as e:
-        supabase_token = f"error: {e}"
-
-    cid = GOOGLE_CLIENT_ID or "NOT SET"
-    cs = GOOGLE_CLIENT_SECRET or "NOT SET"
-    rt = GOOGLE_REFRESH_TOKEN or "NOT SET"
-    return {
-        "client_id": cid[:40] + "..." if len(cid) > 40 else cid,
-        "client_secret_prefix": cs[:12] if cs != "NOT SET" else cs,
-        "refresh_token_env": (rt[:15] + "..." + rt[-4:]) if len(rt) > 19 else rt,
-        "refresh_token_supabase": supabase_token,
-    }
-
-
-@app.get("/test-ai")
-async def test_ai():
-    result = await ask_claude("「おけ！また後でね」とだけ返してください")
-    return {"result": result, "repr": repr(result)}
-
-
 @app.get("/")
 async def root():
-    return {"status": "✅ LINE返信アシスタント 稼働中", "ntfy_channel": NTFY_CHANNEL}
+    return {"status": "✅ スケジュール登録Bot 稼働中"}
