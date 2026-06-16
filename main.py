@@ -27,6 +27,17 @@ GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "")
 GOOGLE_REFRESH_TOKEN = os.environ.get("GOOGLE_REFRESH_TOKEN", "")
 CALENDAR_ID = os.environ.get("CALENDAR_ID", "nakashibakogyo@gmail.com")
 
+# 管理用エンドポイントのアクセスゲート。
+# 個人情報・認証情報を扱うページ/APIは ADMIN_TOKEN を要求する（未設定なら常に拒否＝fail-closed）。
+ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "")
+
+
+def require_admin(request: Request, key: str = ""):
+    """key クエリ or X-Admin-Token ヘッダが ADMIN_TOKEN と一致しなければ 401。"""
+    provided = key or request.headers.get("X-Admin-Token", "")
+    if not (ADMIN_TOKEN and hmac.compare_digest(provided, ADMIN_TOKEN)):
+        raise HTTPException(status_code=401, detail="unauthorized")
+
 
 async def ask_claude(prompt: str, max_tokens: int = 300, system: str = None) -> str:
     payload = {
@@ -374,6 +385,7 @@ async def _receive_message_inner(data: dict):
 
     base_url = os.environ.get("BASE_URL", "https://line-assistant-ncpnpxg3hq-an.a.run.app")
     encoded_reply = urllib.parse.quote(reply)
+    key_q = f"&key={urllib.parse.quote(ADMIN_TOKEN)}" if ADMIN_TOKEN else ""
 
     async with httpx.AsyncClient(timeout=10) as http:
         await http.post(
@@ -383,33 +395,39 @@ async def _receive_message_inner(data: dict):
                 "message": reply,
                 "title": f"{sender}への返信案",
                 "tags": ["speech_balloon"],
-                "actions": [{"action": "view", "label": "コピーページへ", "url": f"{base_url}/copy?text={encoded_reply}&id={conv_id}"}]
+                "actions": [{"action": "view", "label": "コピーページへ", "url": f"{base_url}/copy?text={encoded_reply}&id={conv_id}{key_q}"}]
             }
         )
 
     return {"status": "ok", "reply": reply, "conv_id": conv_id}
 
 
+def _esc(s: str) -> str:
+    return (s or "").replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;').replace('"', '&quot;')
+
+
 @app.get("/latest", response_class=HTMLResponse)
-async def latest_page():
+async def latest_page(request: Request, key: str = ""):
+    require_admin(request, key)
     res = sb.table("conversations").select("contact, their_message, suggested_reply, timestamp, id") \
         .order("timestamp", desc=True).limit(10).execute()
     rows = res.data if res.data else []
 
+    key_q = f"&key={urllib.parse.quote(key)}" if key else ""
     cards = ""
     for row in rows:
-        contact = row["contact"]
-        their_msg = row["their_message"]
+        contact = _esc(row["contact"])
+        their_msg = _esc(row["their_message"][:30])
         reply = row["suggested_reply"]
-        ts = row["timestamp"]
+        ts = _esc(row["timestamp"])
         conv_id = row["id"]
-        escaped_reply = reply.replace('"', '&quot;').replace('<', '&lt;').replace('>', '&gt;')
+        escaped_reply = _esc(reply)
         encoded = urllib.parse.quote(reply)
         cards += f"""
 <div class="card">
-  <p class="meta">{ts[:16]} ／ <strong>{contact}</strong>「{their_msg[:30]}」</p>
+  <p class="meta">{ts[:16]} ／ <strong>{contact}</strong>「{their_msg}」</p>
   <div class="msg">{escaped_reply}</div>
-  <a href="/copy?text={encoded}&id={conv_id}"><button>📋 コピーページへ</button></a>
+  <a href="/copy?text={encoded}&id={conv_id}{key_q}"><button>📋 コピーページへ</button></a>
 </div>"""
 
     if not cards:
@@ -440,8 +458,9 @@ async def latest_page():
 
 
 @app.get("/copy", response_class=HTMLResponse)
-async def copy_page(text: str = "", id: int = 0):
-    escaped = text.replace('"', '&quot;').replace('<', '&lt;').replace('>', '&gt;')
+async def copy_page(request: Request, text: str = "", id: int = 0, key: str = ""):
+    require_admin(request, key)
+    escaped = _esc(text)
     return f"""<!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -604,7 +623,8 @@ async def set_profile(request: Request):
 
 
 @app.get("/contacts", response_class=HTMLResponse)
-async def contacts_page():
+async def contacts_page(request: Request, key: str = ""):
+    require_admin(request, key)
     res = sb.table("contacts").select("name, profile").order("name").execute()
     rows = res.data if res.data else []
     cards = ""
@@ -624,7 +644,8 @@ h3{{margin:0 0 8px;color:#333}}p{{color:#555;font-size:14px;line-height:1.6;marg
 
 
 @app.get("/save-token", response_class=HTMLResponse)
-async def save_token_page():
+async def save_token_page(request: Request, key: str = ""):
+    require_admin(request, key)
     return """<!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -653,10 +674,11 @@ async def save_token_page():
   <p class="done" id="done">✅ 保存しました！カレンダー登録が使えるようになりました。</p>
 </div>
 <script>
+const KEY = new URLSearchParams(location.search).get('key') || '';
 async function save(){
   const token = document.getElementById('token').value.trim();
   if(!token) return alert('トークンを入力してください');
-  const res = await fetch('/save-token', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({token})});
+  const res = await fetch('/save-token', {method:'POST', headers:{'Content-Type':'application/json','X-Admin-Token':KEY}, body: JSON.stringify({token})});
   const data = await res.json();
   if(data.status === 'ok') document.getElementById('done').style.display = 'block';
   else alert('エラー: ' + (data.message || '不明'));
@@ -667,6 +689,7 @@ async function save(){
 
 @app.post("/save-token")
 async def save_token_api(request: Request):
+    require_admin(request)
     data = await request.json()
     token = data.get("token", "").strip()
     if not token:
@@ -741,28 +764,6 @@ async def set_user_color(request: Request):
         return {"status": "error"}
     sb.table("contacts").upsert({"name": f"__line_color_{user_id}__", "profile": color}).execute()
     return {"status": "ok"}
-
-
-@app.get("/debug-auth")
-async def debug_auth():
-    supabase_token = "NOT FOUND"
-    try:
-        res = sb.table("contacts").select("profile").eq("name", "__google_refresh_token__").execute()
-        if res.data and res.data[0]["profile"]:
-            t = res.data[0]["profile"]
-            supabase_token = t[:15] + "..." + t[-4:]
-    except Exception as e:
-        supabase_token = f"error: {e}"
-
-    cid = GOOGLE_CLIENT_ID or "NOT SET"
-    cs = GOOGLE_CLIENT_SECRET or "NOT SET"
-    rt = GOOGLE_REFRESH_TOKEN or "NOT SET"
-    return {
-        "client_id": cid[:40] + "..." if len(cid) > 40 else cid,
-        "client_secret_prefix": cs[:12] if cs != "NOT SET" else cs,
-        "refresh_token_env": (rt[:15] + "..." + rt[-4:]) if len(rt) > 19 else rt,
-        "refresh_token_supabase": supabase_token,
-    }
 
 
 @app.get("/test-ai")
