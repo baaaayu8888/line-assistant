@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>軽トラ 荷台LED作業灯 取り付け資料</title>
+<style>
+  body { font-family: -apple-system, "Hiragino Kaku Gothic ProN", "Yu Gothic", Meiryo, sans-serif;
+         line-height: 1.8; color: #222; max-width: 820px; margin: 0 auto; padding: 24px; background:#fafafa; }
+  h1 { font-size: 1.6em; border-bottom: 4px solid #2e7d32; padding-bottom: 8px; color:#1b5e20; }
+  h2 { font-size: 1.25em; background:#2e7d32; color:#fff; padding: 6px 12px; border-radius:6px; margin-top:32px; }
+  h3 { font-size: 1.08em; color:#1b5e20; border-left: 5px solid #2e7d32; padding-left:10px; margin-top:24px; }
+  table { border-collapse: collapse; width: 100%; margin: 12px 0; background:#fff; }
+  th, td { border: 1px solid #ccc; padding: 8px 10px; text-align: left; font-size: 0.95em; vertical-align: top; }
+  th { background: #e8f5e9; }
+  a { color: #1565c0; word-break: break-all; }
+  .box { background:#fff; border:1px solid #ddd; border-radius:8px; padding:14px 18px; margin:14px 0; }
+  .note { background:#fff8e1; border-left:5px solid #f9a825; padding:10px 14px; border-radius:6px; margin:14px 0; }
+  .warn { background:#ffebee; border-left:5px solid #c62828; padding:10px 14px; border-radius:6px; margin:14px 0; }
+  pre { background:#263238; color:#eceff1; padding:14px; border-radius:8px; overflow-x:auto; font-size:0.9em; line-height:1.6; }
+  .total { font-weight:bold; color:#c62828; }
+  ol li, ul li { margin: 4px 0; }
+  .small { font-size:0.85em; color:#666; }
+  .badge { display:inline-block; background:#2e7d32; color:#fff; border-radius:4px; padding:1px 8px; font-size:0.8em; margin-right:6px;}
+</style>
+</head>
+<body>
+
+<h1>軽トラ 荷台LED作業灯 取り付け資料</h1>
+<p class="small">作成日: 2026年6月15日 ／ 方式: <b>リレー＋ACC連動</b>（エンジンを切ると自動消灯・将来の増設対応）</p>
+
+<div class="box">
+<b>📌 この資料のまとめ</b>
+<ul>
+  <li><b>結論:</b> 自分で取り付け可能。車屋の見積りは約2万円だが、ほぼ工賃。</li>
+  <li><b>材料費:</b> 部材だけで <b>約8,000〜9,000円</b>（工具を別途買っても＋3,000円ほど）。</li>
+  <li><b>仕組み:</b> エンジン（キー）を切ると<b>自動で消灯</b>。運転席のスイッチでも任意にON/OFF。</li>
+  <li><b>増設:</b> リレー方式なので、後からライトを足してもOK（27Wを4個まで余裕）。</li>
+</ul>
+</div>
+
+<h2>1. なぜ「リレー＋ACC連動」にするのか</h2>
+<div class="warn">
+<b>バッテリー直結はNG。</b> 消し忘れでバッテリーが上がる／ヒューズなしだとショート時に発火リスクがある。
+</div>
+<p>そこで <b>ACC（アクセサリー）電源</b>＝「キーをONにしたときだけ電気が来る線」でリレーを制御する。
+こうすると <b>エンジンを切れば自動で消灯</b>。さらに運転席のスイッチで任意にも消せる（二重で安心）。
+重い電流はリレーを通して流すので、配線が焼けにくく、将来ライトを増やしても安全。</p>
+
+<h2>2. 配線のしくみ（イメージ）</h2>
+<pre>
+バッテリー(+) ──[ヒューズ]── リレー[30番]
+リレー[87番] ── 作業灯(+) ── 作業灯(-) ── ボディアース
+リレー[85番] ── アース
+リレー[86番] ── スイッチ ── ACC電源(取り出しヒューズ)
+</pre>
+<p class="small">※ 増設するときは「作業灯(+)」から枝分かれで足すだけ。リレー容量（一般的に20〜30A）内なら何個でもOK。</p>
+
+<h2>3. 部材リスト（買うもの）</h2>
+<p class="small">リンクは楽天市場の検索結果（安い・高評価から選べる）。規格を合わせやすいので <b>エーモン製</b>で揃えるのがおすすめ。</p>
+<table>
+<tr><th>部材</th><th>役割</th><th>値段目安</th><th>リンク</th></tr>
+<tr><td>LED作業灯 27W×2<br>(12/24V兼用・防水)</td><td>ライト本体。増設時はここを追加</td><td>約3,600円〜</td><td><a href="https://search.rakuten.co.jp/search/mall/LED%E4%BD%9C%E6%A5%AD%E7%81%AF%2027W%2012V%2024V%20%E9%98%B2%E6%B0%B4%202%E5%80%8B%E3%82%BB%E3%83%83%E3%83%88/">楽天で探す</a></td></tr>
+<tr><td>リレー 4極/5極(エーモン)</td><td>ACCで大電流をON/OFF</td><td>約600円</td><td><a href="https://search.rakuten.co.jp/search/mall/%E3%82%A8%E3%83%BC%E3%83%A2%E3%83%B3%20%E3%83%AA%E3%83%AC%E3%83%BC%204%E6%A5%B5%205%E6%A5%B5%20%E8%87%AA%E5%8B%95%E8%BB%8A/">楽天で探す</a></td></tr>
+<tr><td>電源取り出しヒューズ</td><td>ヒューズBOXからACC取得</td><td>約400円</td><td><a href="https://search.rakuten.co.jp/search/mall/%E3%82%A8%E3%83%BC%E3%83%A2%E3%83%B3%20%E9%9B%BB%E6%BA%90%E5%8F%96%E3%82%8A%E5%87%BA%E3%81%97%20%E4%BD%8E%E8%83%8C%E3%83%92%E3%83%A5%E3%83%BC%E3%82%BA%20ACC/">楽天で探す</a></td></tr>
+<tr><td>インラインヒューズホルダー</td><td>バッテリー側の保護(必須)</td><td>約300円</td><td><a href="https://search.rakuten.co.jp/search/mall/%E3%82%A8%E3%83%BC%E3%83%A2%E3%83%B3%20%E3%83%92%E3%83%A5%E3%83%BC%E3%82%BA%E3%83%9B%E3%83%AB%E3%83%80%E3%83%BC%20%E5%B9%B3%E5%9E%8B%20%E9%85%8D%E7%B7%9A/">楽天で探す</a></td></tr>
+<tr><td>スイッチ(LED付き・12V)</td><td>運転席で任意ON/OFF</td><td>約500円</td><td><a href="https://search.rakuten.co.jp/search/mall/%E3%82%A8%E3%83%BC%E3%83%A2%E3%83%B3%20%E3%82%B9%E3%82%A4%E3%83%83%E3%83%81%2012V%20LED%20%E3%83%AD%E3%83%83%E3%82%AB%E3%83%BC%E3%82%B9%E3%82%A4%E3%83%83%E3%83%81/">楽天で探す</a></td></tr>
+<tr><td>配線コード 2sq(太め)</td><td>バッテリー〜リレー〜ライト</td><td>約700円</td><td><a href="https://search.rakuten.co.jp/search/mall/%E3%82%A8%E3%83%BC%E3%83%A2%E3%83%B3%20%E9%85%8D%E7%B7%9A%E3%82%B3%E3%83%BC%E3%83%89%202sq%20AVS%20%E8%87%AA%E5%8B%95%E8%BB%8A/">楽天で探す</a></td></tr>
+<tr><td>配線コード 0.5sq(細め)</td><td>リレー制御/信号線</td><td>約500円</td><td><a href="https://search.rakuten.co.jp/search/mall/%E3%82%A8%E3%83%BC%E3%83%A2%E3%83%B3%20%E9%85%8D%E7%B7%9A%E3%82%B3%E3%83%BC%E3%83%89%200.5sq%20AVS/">楽天で探す</a></td></tr>
+<tr><td>ギボシ端子セット</td><td>接続・分岐</td><td>約500円</td><td><a href="https://search.rakuten.co.jp/search/mall/%E3%82%A8%E3%83%BC%E3%83%A2%E3%83%B3%20%E3%82%AE%E3%83%9C%E3%82%B7%E7%AB%AF%E5%AD%90%20%E3%82%BB%E3%83%83%E3%83%88%20%E5%B7%A5%E5%85%B7/">楽天で探す</a></td></tr>
+<tr><td>防水カプラー(2極)</td><td>荷台側ライト接続部の防水</td><td>約400円</td><td><a href="https://search.rakuten.co.jp/search/mall/%E9%98%B2%E6%B0%B4%E3%82%AB%E3%83%97%E3%83%A9%E3%83%BC%202%E6%A5%B5%20%E9%9B%BB%E8%A3%85%20%E3%82%B3%E3%83%8D%E3%82%AF%E3%82%BF%E3%83%BC/">楽天で探す</a></td></tr>
+<tr><td>コルゲートチューブ</td><td>配線保護・見た目</td><td>約500円</td><td><a href="https://search.rakuten.co.jp/search/mall/%E3%82%B3%E3%83%AB%E3%82%B2%E3%83%BC%E3%83%88%E3%83%81%E3%83%A5%E3%83%BC%E3%83%96%20%E9%85%8D%E7%B7%9A%20%E4%BF%9D%E8%AD%B7%20%E8%87%AA%E5%8B%95%E8%BB%8A/">楽天で探す</a></td></tr>
+<tr><td>取り付けステー(L字金具)</td><td>本体付属なら不要</td><td>約500円</td><td><a href="https://search.rakuten.co.jp/search/mall/%E4%BD%9C%E6%A5%AD%E7%81%AF%20%E5%8F%96%E3%82%8A%E4%BB%98%E3%81%91%20%E3%82%B9%E3%83%86%E3%83%BC%20L%E5%AD%97%20%E9%87%91%E5%85%B7/">楽天で探す</a></td></tr>
+</table>
+<p class="total">▶ 部材合計: 約8,000〜9,000円（ライト2個込み）</p>
+
+<h2>4. 工具（持っていなければ）</h2>
+<table>
+<tr><th>工具</th><th>用途</th><th>リンク</th></tr>
+<tr><td>検電テスター</td><td>ACC線を探す(必須)</td><td><a href="https://search.rakuten.co.jp/search/mall/%E3%82%A8%E3%83%BC%E3%83%A2%E3%83%B3%20%E6%A4%9C%E9%9B%BB%E3%83%86%E3%82%B9%E3%82%BF%E3%83%BC%20%E8%87%AA%E5%8B%95%E8%BB%8A/">楽天で探す</a></td></tr>
+<tr><td>電工ペンチ</td><td>端子の圧着</td><td><a href="https://search.rakuten.co.jp/search/mall/%E3%82%A8%E3%83%BC%E3%83%A2%E3%83%B3%20%E9%9B%BB%E5%B7%A5%E3%83%9A%E3%83%B3%E3%83%81%20%E3%82%BF%E3%83%BC%E3%83%9F%E3%83%8A%E3%83%AB%E3%82%BB%E3%83%83%E3%83%88/">楽天で探す</a></td></tr>
+<tr><td>鉄工ドリルビット 8.5mm</td><td>鳥居の穴あけ</td><td><a href="https://search.rakuten.co.jp/search/mall/%E9%89%84%E5%B7%A5%20%E3%83%89%E3%83%AA%E3%83%AB%20%E3%83%93%E3%83%83%E3%83%88%208.5mm/">楽天で探す</a></td></tr>
+</table>
+<p class="small">※ 電動ドリル本体は別途必要。工具一式そろえても＋3,000円ほど。</p>
+
+<h2>5. 取り付け工程</h2>
+
+<h3>① 配線図を頭に入れる</h3>
+<p>上の「2. 配線のしくみ」のとおり。バッテリー→ヒューズ→リレー、リレーをACC＋スイッチで制御する。</p>
+
+<h3>② ライトを荷台の鳥居に固定</h3>
+<ul>
+  <li>取り付け位置を決める（<b>後方/荷台向き</b>。前方照射は道交法でNG）</li>
+  <li>8.5mmの鉄工ドリルで穴あけ → M8ボルトで固定</li>
+  <li>切粉や穴の断面はサビ止めにタッチアップ</li>
+</ul>
+
+<h3>③ ACC電源を確保</h3>
+<ul>
+  <li>ヒューズBOXのACC系ヒューズを検電テスターで特定（<b>キーOFFで通電が消える所</b>）</li>
+  <li>電源取り出しヒューズに差し替えて分岐線を確保</li>
+</ul>
+
+<h3>④ リレー・配線を取り回す</h3>
+<ul>
+  <li>リレーはエンジンルーム内（バッテリー近く）に固定</li>
+  <li>バッテリー(+)→ヒューズ→リレーの「太い線」を接続</li>
+  <li>ライトへの線は運転席上のゴムブッシュから荷台へ。コルゲートチューブで保護＆防水</li>
+  <li>荷台側のライト接続は防水カプラーで</li>
+</ul>
+
+<h3>⑤ スイッチを運転席に設置</h3>
+<ul>
+  <li>リレー制御線(86番)を運転席まで引き、スイッチを噛ませる</li>
+  <li>これで「キーON(ACC通電)＋スイッチON」で点灯。<b>キーOFFで自動消灯</b></li>
+</ul>
+
+<h3>⑥ アース・最終確認</h3>
+<ul>
+  <li>アースはボルト固定の金属ボディへ確実に</li>
+  <li>ヒューズを最後に挿す → キーON/OFFで自動点灯/消灯を確認 → 防水処理を仕上げ</li>
+</ul>
+
+<div class="note">
+<b>💡 ヒューズ容量の目安:</b> ライト合計W数 ÷ 12V ＝ 必要アンペアの約1.5倍。
+27W×2(=約4.5A)なら 7.5〜10Aヒューズ。<b>増設を見込むなら15A</b>を選んでおくと安心。
+</div>
+
+<h2>6. 各工程の参考動画・解説</h2>
+<p class="small">工程ごとに分かりやすい動画（📺）と公式の図解（📖）をまとめた。スマホでそのまま見ながら作業できる。</p>
+<table>
+<tr><th>工程</th><th>内容</th><th>リンク</th></tr>
+<tr><td>全体の流れ</td><td>📺 軽トラに作業灯を一から取り付け（ハイゼット200系・部品リスト付き）</td><td><a href="https://www.youtube.com/watch?v=x8jrpWatC-w">YouTubeで見る</a></td></tr>
+<tr><td>全体＋注意点</td><td>📺 作業灯の取り付けと車検NG（前方照射）の注意点</td><td><a href="https://www.youtube.com/watch?v=GNLoDmh6XKU">YouTubeで見る</a></td></tr>
+<tr><td>② ライト固定（鳥居）</td><td>📺 軽トラの鳥居に作業灯を取り付け</td><td><a href="https://www.youtube.com/watch?v=vECZPwt6ErE">YouTubeで見る</a></td></tr>
+<tr><td>③ ACC電源を確保</td><td>📺 検電テスターの使い方＋ヒューズ電源の取り出し方【エーモン】</td><td><a href="https://www.youtube.com/watch?v=utGI3HJDOSg">YouTubeで見る</a></td></tr>
+<tr><td>③ ACC電源を確保</td><td>📺 プラス電源の取り出し方 ヒューズボックス編【AMON DIY SCHOOL #8】</td><td><a href="https://www.youtube.com/watch?v=HwLMlVZ651A">YouTubeで見る</a></td></tr>
+<tr><td>④ リレー配線</td><td>📖 リレーのしくみ・使い方（図解／エーモン公式）</td><td><a href="https://www.amon.jp/diy/index.php?diy_id=50&mode=contents&page=2">公式ページを見る</a></td></tr>
+<tr><td>④ リレー配線</td><td>📖 5極リレーの使い方 初心者向け解説（DIY Labo）</td><td><a href="https://www.diylabo.jp/basic/basic-51-2.html">解説を見る</a></td></tr>
+<tr><td>⑥ ギボシ端子の圧着</td><td>📺 ギボシ端子のかしめ方【エーモン】</td><td><a href="https://www.youtube.com/watch?v=CJNxUS1GhzI">YouTubeで見る</a></td></tr>
+<tr><td>⑥ ギボシ端子の圧着</td><td>📺 ギボシ端子の付け方と電工ペンチの使い方</td><td><a href="https://www.youtube.com/watch?v=X62I23Gdr-A">YouTubeで見る</a></td></tr>
+</table>
+
+<h2>7. 参考にしたサイト</h2>
+<ul>
+  <li><a href="https://search.rakuten.co.jp/search/mall/LED%E4%BD%9C%E6%A5%AD%E7%81%AF+27w/">LED作業灯 27w（楽天市場 検索）</a></li>
+  <li><a href="https://sambar.fun/electronics/11718/">軽トラックのアウトドア仕様カスタム・DIY（sambar.fun）</a></li>
+  <li><a href="https://tainosashimi.hatenablog.com/entry/2017/02/05/194025">軽トラ作業灯取り付け（鯛野さしみのパルプンテ）</a></li>
+  <li><a href="https://da16t.com/worklight/">超お手軽なLEDワークライト・作業灯（軽トラカスタムの教科書）</a></li>
+</ul>
+
+<p class="small" style="margin-top:32px; border-top:1px solid #ccc; padding-top:10px;">
+※ 価格は2026年6月時点の目安。実際の購入時に各商品ページでW数・電圧(12V対応)・防水性能をご確認ください。
+作業灯の前方点灯は道路交通法で禁止されています。走行中は消灯し、荷台作業時のみ使用してください。
+</p>
+
+</body>
+</html>
